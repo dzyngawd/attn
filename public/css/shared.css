@@ -1,0 +1,112 @@
+/* attn — shared base styles (reset, buttons, switch, chips, orb, toast).
+   Used by the Control Centre and the landing page. The device has its own
+   self-contained stylesheet so it can be dropped into the preview unchanged. */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg-canvas);
+  color: var(--fg-1);
+  font-family: var(--font-action);
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+h1, h2, h3, p { margin: 0; }
+button { font: inherit; color: inherit; }
+button, input, select, textarea { font-family: inherit; }
+:focus-visible { outline: 3px solid var(--attn-sky-soft); outline-offset: 2px; }
+button:focus:not(:focus-visible) { outline: 0; }
+
+/* ---- buttons: pills, tactile press ---- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: 0; cursor: pointer; border-radius: var(--r-pill);
+  font: 600 var(--fs-label)/1 var(--font-action);
+  padding: 10px 16px;
+  transition: transform var(--dur-feedback) var(--ease-out), background var(--dur-feedback), box-shadow var(--dur-feedback);
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active { transform: scale(.97); }
+.btn svg { width: 16px; height: 16px; flex: none; }
+.btn-dark { background: var(--surface-priority); color: var(--text-on-dark); }
+.btn-dark:hover { background: var(--surface-priority-raised); }
+.btn-light { background: var(--bg-card); color: var(--fg-1); box-shadow: inset 0 0 0 1px var(--hairline); }
+.btn-light:hover { background: var(--bg-subtle); }
+.btn-blue { background: var(--attn-action); color: #fff; }
+.btn-blue:hover { background: var(--attn-sky); }
+.btn-lg { padding: 16px 24px; font-size: var(--fs-body-large); }
+.btn-text { background: none; border: 0; padding: 6px 4px; color: var(--fg-3); font: 600 var(--fs-label)/1 var(--font-action); cursor: pointer; }
+.btn-text:hover { color: var(--fg-1); }
+
+.icon-btn {
+  width: 30px; height: 30px; border-radius: 50%; border: 0; padding: 0;
+  background: var(--bg-subtle); color: var(--fg-2);
+  display: inline-grid; place-items: center; cursor: pointer;
+  transition: transform var(--dur-feedback) var(--ease-out), background var(--dur-feedback), opacity var(--dur-feedback);
+}
+.icon-btn svg { width: 14px; height: 14px; }
+.icon-btn:hover { background: var(--hairline); color: var(--fg-1); }
+.icon-btn:active { transform: scale(.9); }
+.icon-btn:disabled { opacity: .25; cursor: default; }
+
+/* ---- status chips ---- */
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: var(--r-pill); font: 600 var(--fs-caption)/1 var(--font-action); white-space: nowrap; }
+.chip-connected { background: var(--status-connected-background); color: var(--status-connected-text); }
+.chip-ready { background: var(--surface-confidence); color: var(--text-on-mint); }
+.chip-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* ---- iOS-style switch (green on), per the Figma Toggle ---- */
+.switch { position: relative; display: inline-block; flex: none; width: 51px; height: 31px; }
+.switch input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+.switch-track {
+  position: absolute; inset: 0; border-radius: var(--r-pill);
+  background: rgba(120,120,128,.32);
+  transition: background var(--dur-micro) var(--ease-out);
+}
+.switch-knob {
+  position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
+  background: #fff; box-shadow: 0 3px 8px rgba(0,0,0,.15), 0 1px 1px rgba(0,0,0,.16);
+  transition: transform var(--dur-content) var(--ease-selection), width var(--dur-micro) var(--ease-out);
+}
+.switch input:checked + .switch-track { background: var(--accents-green); }
+.switch input:checked + .switch-track .switch-knob { transform: translateX(20px); }
+.switch input:active + .switch-track .switch-knob { width: 31px; }
+.switch input:checked:active + .switch-track .switch-knob { transform: translateX(16px); }
+.switch input:focus-visible + .switch-track { box-shadow: 0 0 0 3px var(--attn-sky-soft); }
+
+/* ---- tiles (item-type glyph on a soft colour) ---- */
+.tile { width: 40px; height: 40px; border-radius: 12px; flex: none; display: grid; place-items: center; color: var(--attn-ink); background: var(--tile, var(--tile-manual)); }
+.tile svg { width: 20px; height: 20px; }
+.tile-sm { width: 36px; height: 36px; border-radius: 11px; }
+.tile-sm svg { width: 18px; height: 18px; }
+
+/* ---- the attn orb (Figma "Loading" orb): sky + sun blobs on white ---- */
+.orb { position: relative; width: 56px; height: 56px; border-radius: 50%; background: var(--surface-card); box-shadow: var(--shadow-orb); overflow: hidden; }
+.orb::before, .orb::after { content: ""; position: absolute; width: 62%; height: 62%; border-radius: 46% 54% 52% 48% / 55% 45% 55% 45%; }
+.orb::before { left: -6%; top: 8%; background: var(--attn-sky); animation: orb-spin var(--dur-ambient-a) linear infinite; transform-origin: 80% 70%; }
+.orb::after { right: -4%; bottom: 4%; background: var(--attn-sun); animation: orb-spin var(--dur-ambient-b) linear infinite reverse; transform-origin: 20% 30%; }
+@keyframes orb-spin { to { transform: rotate(360deg); } }
+
+/* ---- toast ---- */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; z-index: 20;
+  transform: translate(-50%, 12px);
+  background: var(--surface-priority); color: var(--text-on-dark);
+  padding: 12px 18px; border-radius: var(--r-pill);
+  font: 600 var(--fs-label)/1 var(--font-action);
+  box-shadow: var(--shadow-widget-item);
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--dur-content) var(--ease-out), transform var(--dur-content) var(--ease-content);
+}
+.toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---- calm "connecting" screen shared by control + landing ---- */
+.boot { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; color: var(--fg-2); font: 500 15px/1 var(--font-brand); background: var(--bg-canvas); z-index: 5; }
+.boot[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .orb::before, .orb::after { animation: none; }
+}

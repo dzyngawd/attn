@@ -1,0 +1,27 @@
+<!-- @dsCard group="Components" viewport="700x520" name="Lists & rows" subtitle="Row, Trailing, Menu Items, Settings row, Separator" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{margin:0;padding:18px;background:#fff;font-family:var(--font-action);color:var(--fg-1)}.r{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:14px}.c{display:flex;flex-direction:column;gap:6px;align-items:flex-start}.l{font:600 10px var(--font-action);color:var(--fg-3);letter-spacing:.02em}.dk{background:var(--surface-priority);padding:12px;border-radius:16px}.sk{background:var(--grad-sky);padding:14px;border-radius:20px}.gr{background:var(--surface-canvas);padding:12px;border-radius:16px}</style></head><body><div id="root"></div>
+<script type="text/babel">
+const NS = window.AttnDesignSystem_f5a858;
+const L=({t,children})=><div className="c">{children}<span className="l">{t}</span></div>;
+const {Row,Trailing:Tr,MenuItems:M,SettingsRowContainer:Sr,Separator:Se,Grabber:Gb,ImagesRegular:Ir,ImagesTall:It}=NS;
+ReactDOM.createRoot(document.getElementById('root')).render(<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+<div className="c" style={{alignItems:'stretch'}}>
+<L t="Row · regular"><Row title="Home Screen Widget" height="regular"/></L>
+<L t="Row · tall + subtitle"><Row title="Gmail" subtitle="liamoliver@gmail.com" height="tall" showSubtitle showImage/></L>
+<L t="Settings Row Container"><Sr text1="Notifications & Widget"/></L>
+<L t="Separator"><div style={{width:300}}><Se mode="light"/></div></L>
+<div className="r">{['fill','circular','rounded','symbol'].map(t=><L key={t} t={'img · '+t}><Ir type={t}/></L>)}</div>
+<div className="r">{['fill','rounded'].map(t=><L key={t} t={'tall · '+t}><It type={t}/></L>)}<L t="grabber"><Gb/></L></div>
+</div>
+<div className="c">
+{['default','disclosure','toggle','pop-up','stepper','button','picker - date'].map(t=><L key={t} t={'trailing · '+t}><Tr type={t}/></L>)}
+<L t="Menu Items · light"><M label="Mark as reviewed" mode="light" state="default"/></L>
+<L t="destructive"><M label="Disconnect Gmail" mode="light" state="destructive"/></L>
+<L t="disabled"><M label="Snooze" mode="light" state="disabled"/></L>
+</div></div>);
+</script></body></html>

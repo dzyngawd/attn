@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>attn — Control Centre</title>
+  <meta name="description" content="Choose what deserves your attention.">
+  <meta name="theme-color" content="#F0EFEA">
+  <link rel="icon" href="/icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Agbalumo&family=Inter+Tight:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/shared.css">
+  <link rel="stylesheet" href="/css/device.css">
+  <link rel="stylesheet" href="/css/control.css">
+</head>
+<body class="cc">
+  <!-- Calm state while we reach the server for the first time -->
+  <div id="boot" class="boot"><div class="orb"></div><span>Connecting to attn…</span></div>
+
+  <div id="app" class="cc-layout" hidden>
+    <div class="cc-main">
+      <header class="cc-header">
+        <div class="cc-logo" id="logo"></div>
+        <p class="cc-tagline">Choose what deserves your attention.</p>
+        <div class="cc-status">
+          <span class="pill" id="device-status" data-state="unknown" title="Open /device on your phone"><span class="pill-dot"></span><span class="pill-text">Waiting for device</span></span>
+          <span class="pill pill-quiet" id="sync-status" data-state="connecting"><span class="pill-text">Connecting…</span></span>
+        </div>
+      </header>
+
+      <section class="cc-section" aria-labelledby="h-sources">
+        <h2 id="h-sources">Your sources</h2>
+        <p class="cc-section-hint">What attn is allowed to read. Demo connections only for now — nothing leaves this page.</p>
+        <div id="sources" class="sources"></div>
+      </section>
+
+      <section class="cc-section" aria-labelledby="h-modules">
+        <h2 id="h-modules">Show on attn</h2>
+        <p class="cc-section-hint">Turn a module on to put it on the device, then edit what it says. Changes reach the phone in a second or two.</p>
+        <div id="modules" class="modules"></div>
+      </section>
+
+      <footer class="cc-foot">Open <code>/device</code> on your phone to see it live.</footer>
+    </div>
+
+    <aside class="cc-side">
+      <div class="preview">
+        <div class="preview-caption">Live preview</div>
+        <div class="phone"><div class="phone-screen" id="preview-frame"><div class="phone-scaler" id="preview-scaler"><div id="preview-device"></div></div></div></div>
+        <p class="preview-note">Rendered from the same state and code as the phone.</p>
+      </div>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/js/control.js"></script>
+</body>
+</html>

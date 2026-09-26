@@ -1,0 +1,45 @@
+/* attn — px-ready semantic aliases over the Figma Variables in fig-tokens.css.
+   fig-tokens FLOATs are unitless; these add units so consumers can use them directly. */
+:root{
+/* type families */
+--font-brand:"Inter Tight",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+--font-action:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+--font-system:"SF Pro","SF Pro Text",-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+--font-clock:"Agbalumo","Inter Tight",cursive;
+/* type scale (px) */
+--fs-display:52px;--fs-title-large:28px;--fs-title-medium:24px;--fs-title-small:20px;
+--fs-headline:17px;--fs-body-large:16px;--fs-body:14px;--fs-label:13px;--fs-caption:12px;--fs-badge:11px;--fs-price:18px;
+--fs-device-clock:128px;--fs-device-status:32px;--fs-device-date:24px;
+--lh-body-reading:19.6px;
+/* spacing (px) */
+--sp-2:2px;--sp-4:4px;--sp-6:6px;--sp-8:8px;--sp-10:10px;--sp-12:12px;--sp-13:13px;--sp-14:14px;--sp-16:16px;--sp-18:18px;--sp-20:20px;--sp-24:24px;--sp-32:32px;--sp-56:56px;
+--sp-compact:8px;--sp-control:10px;--sp-card:12px;--sp-action-x:13px;--sp-row:14px;--sp-content:16px;--sp-screen:16px;--sp-screen-x:20px;--sp-panel:20px;--sp-section:24px;--sp-result:56px;
+/* radii (px) */
+--r-small:8px;--r-medium:12px;--r-widget-item:16px;--r-identity:20px;--r-priority-inner:24px;--r-widget-item-raised:24px;--r-card:28px;--r-widget:28px;--r-panel:30px;--r-widget-large:34px;--r-pill:100px;
+--r-device:72px;--r-device-bezel:83px;
+/* surfaces & text (aliases of attn / Semantic) */
+--bg-canvas:var(--surface-canvas);--bg-card:var(--surface-card);--bg-settings:var(--surface-settings);--bg-subtle:var(--surface-subtle);
+--bg-priority:var(--surface-priority);--bg-priority-raised:var(--surface-priority-raised);--bg-widget:var(--surface-widget);--bg-confidence:var(--surface-confidence);
+--fg-1:var(--text-primary);--fg-2:var(--text-secondary);--fg-3:var(--text-tertiary);--fg-4:var(--text-quaternary);--fg-subtle:var(--text-subtle);
+--fg-on-dark:var(--text-on-dark);--fg-on-dark-2:var(--text-on-dark-secondary);--fg-on-dark-3:var(--text-on-dark-tertiary);
+/* brand color */
+--attn-sky:rgb(0,159,254);--attn-sky-soft:rgb(124,208,255);--attn-cream:rgb(249,251,227);--attn-sun:rgb(255,214,0);--attn-ink:rgb(10,10,10);--attn-mint:var(--color-mint-100);
+--attn-action:var(--color-blue-500);--attn-danger:var(--color-action-red);
+/* gradients */
+--grad-sky:linear-gradient(180deg,rgb(0,159,254) 0%,rgb(249,251,227) 100%);/* @kind other */
+--grad-sky-screen:linear-gradient(180deg,rgb(0,159,254) 0%,rgb(124,208,255) 45%,rgb(255,255,255) 100%);/* @kind other */
+--grad-orb:linear-gradient(135deg,rgb(255,214,0) 0%,rgb(124,208,255) 100%);/* @kind other */
+/* elevation */
+--shadow-card:0px 4px 7.8px 0px rgba(0,0,0,0.08);
+--shadow-widget-item:0px 8.459px 16.494px 0px rgba(0,0,0,0.08);
+--shadow-bevel:inset -2px 2px 1.3px 0px rgba(255,255,255,0.36),inset 0px -2px 1px 0px rgba(0,0,0,0.25);
+--shadow-orb:inset 0px 1px 6.5px 0px rgba(89,89,89,0.25);
+--shadow-device:inset 0px 42.293px 21.146px -42.293px rgb(34,34,34),inset 0px -42.293px 21.146px -42.293px rgb(34,34,34),inset 0px 2.115px 0px 0px rgb(26,26,26),inset 0px -2.115px 0px 0px rgb(26,26,26);
+--shadow-eye:-3.451px 4.601px 5.751px 0px rgba(90,69,36,0.2392);
+--stroke-mascot:4.5px solid var(--attn-ink);
+/* motion (ms + curves) */
+--dur-feedback:120ms;/* @kind other */--dur-micro:200ms;/* @kind other */--dur-content:300ms;/* @kind other */--dur-list:320ms;/* @kind other */--dur-expressive:550ms;/* @kind other */--stagger:60ms;/* @kind other */
+--dur-ambient-identity:7500ms;/* @kind other */--dur-ambient-a:8500ms;/* @kind other */--dur-ambient-b:10500ms;/* @kind other */--dur-ambient-c:13000ms;/* @kind other */
+--ease-selection:cubic-bezier(.3,1.04,.5,1);/* @kind other */--ease-content:cubic-bezier(.3,1.08,.5,1);/* @kind other */--ease-expressive:cubic-bezier(.34,1.22,.5,1);/* @kind other */--ease-out:cubic-bezier(.2,.8,.2,1);/* @kind other */
+}
+a{color:var(--attn-action)}a:hover{color:var(--attn-sky)}

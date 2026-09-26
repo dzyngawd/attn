@@ -1,0 +1,11 @@
+# Render Blueprint — free alternative to Replit.
+# Dashboard → New → Blueprint → pick this repo. Every push to main redeploys.
+services:
+  - type: web
+    name: attn
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    healthCheckPath: /api/status

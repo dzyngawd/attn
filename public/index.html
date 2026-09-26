@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>attn</title>
+  <meta name="theme-color" content="#F0EFEA">
+  <link rel="icon" href="/icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Agbalumo&family=Inter+Tight:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/shared.css">
+  <style>
+    .land { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 32px 20px; text-align: center; }
+    .land-logo { height: 72px; }
+    .land p { font: 500 18px/1.4 var(--font-brand); color: var(--fg-2); max-width: 30ch; }
+    .land-actions { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 320px; }
+    .land-actions .btn { text-decoration: none; }
+    .land small { color: var(--fg-4); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main class="land">
+    <div class="land-logo" id="logo"></div>
+    <p>Know what deserves your attention.</p>
+    <div class="land-actions">
+      <a class="btn btn-dark btn-lg" href="/control">Open Control Centre</a>
+      <a class="btn btn-blue btn-lg" href="/device">Open Device</a>
+    </div>
+    <small>Control Centre on your laptop · Device on your phone</small>
+  </main>
+  <script type="module">import { LOGO_SVG } from "/js/brand.js"; document.getElementById("logo").innerHTML = LOGO_SVG;</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+<!-- @dsCard group="Components" viewport="700x360" name="Controls" subtitle="Toggle, checkbox/radio, stepper, pop-up, date" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{margin:0;padding:18px;background:#fff;font-family:var(--font-action);color:var(--fg-1)}.r{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:14px}.c{display:flex;flex-direction:column;gap:6px;align-items:flex-start}.l{font:600 10px var(--font-action);color:var(--fg-3);letter-spacing:.02em}.dk{background:var(--surface-priority);padding:12px;border-radius:16px}.sk{background:var(--grad-sky);padding:14px;border-radius:20px}.gr{background:var(--surface-canvas);padding:12px;border-radius:16px}</style></head><body><div id="root"></div>
+<script type="text/babel">
+const NS = window.AttnDesignSystem_f5a858;
+const L=({t,children})=><div className="c">{children}<span className="l">{t}</span></div>;
+const {ToggleSwitch:Tg,CheckboxInput:C,Stepper:St,Increment:I,Decrement:De,PopupButton:Pp,EditButtonsLight:E,DateAndTimeCollapsed:Dt,ContentsDisclosure:Cd}=NS;
+ReactDOM.createRoot(document.getElementById('root')).render(<div>
+<div className="r"><L t="toggle on"><Tg isOn/></L><L t="off"><Tg isOn={false}/></L><L t="pressed"><Tg isOn state="pressed"/></L><L t="disabled"><Tg isOn isEnabled={false}/></L></div>
+<div className="r">{[['checkbox input',true],['checkbox input',false],['radio input',true],['radio input',false]].map(([t,c],i)=><L key={i} t={t.split(' ')[0]+(c?' ✓':'')}><C type={t} checked={c} size="default" status="initial"/></L>)}<L t="focus"><C type="checkbox input" status="focus" checked/></L><L t="disabled"><C type="radio input" status="disabled"/></L></div>
+<div className="r"><L t="stepper"><St/></L><L t="increment"><I/></L><L t="pressed"><I style2="pressed"/></L><L t="decrement"><De/></L><L t="disabled"><De style2="disabled"/></L></div>
+<div className="r"><L t="pop-up"><Pp label="Daily"/></L><L t="disabled"><Pp label="Daily" isEnabled={false}/></L><L t="date"><Dt/></L><L t="selected"><Dt state="selected"/></L></div>
+<div className="r">{['selected','unselected','add','remove'].map(s=><L key={s} t={'edit · '+s}><E state={s}/></L>)}<L t="disclosure"><Cd/></L><L t="disclosed"><Cd disclosed/></L></div>
+</div>);
+</script></body></html>

@@ -1,0 +1,29 @@
+<!-- @dsCard group="Brand" viewport="700x400" name="Mascot" subtitle="Blocky-eyed face · puzzled · idle · listening · speaking" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css"><style>
+body{margin:0;padding:18px;background:#fff;font-family:var(--font-action)}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px}
+.f{position:relative;height:152px;border-radius:22px;background:var(--grad-sky);box-shadow:inset 0 10px 8px -10px rgba(34,34,34,.5),inset 0 -10px 8px -10px rgba(34,34,34,.35);overflow:hidden;display:flex;align-items:center;justify-content:center}
+.l{font:600 11px var(--font-action);color:var(--fg-3);margin-top:6px}
+.face{position:relative;width:120px;height:78px;animation:fl 7.5s ease-in-out infinite}
+.e{position:absolute;top:0;width:36px;height:34px;background:rgb(18,18,18);border-radius:40% 34% 38% 42%/42% 40% 36% 38%;transform-origin:50% 60%;animation:bl 4.2s infinite}
+.e.a{left:0}.e.b{right:0;border-radius:34% 40% 42% 38%/40% 42% 38% 36%}
+.e i{position:absolute;top:6px;width:10px;height:9px;background:#fff;border-radius:3px}
+.e.a i{right:7px}.e.b i{left:7px}
+.dash{position:absolute;left:49px;top:45px;width:23px;height:5px;border-radius:3px;background:rgb(18,18,18)}
+.wave{position:absolute;left:50%;top:60px;transform:translate(-50%,-50%);display:flex;gap:3px;align-items:center}
+.wave b{display:block;width:4px;border-radius:2px;background:rgb(18,18,18);animation:wv 900ms ease-in-out infinite}
+.wave b:nth-child(1){height:9px;animation-delay:-.1s}.wave b:nth-child(2){height:17px;animation-delay:-.3s}.wave b:nth-child(3){height:24px;animation-delay:-.5s}.wave b:nth-child(4){height:28px;animation-delay:-.2s}.wave b:nth-child(5){height:19px;animation-delay:-.4s}.wave b:nth-child(6){height:10px;animation-delay:-.6s}
+.listen .wave b{animation-duration:1400ms}
+.bub{position:absolute;left:76px;top:-40px;width:48px;height:36px;background:rgb(228,227,224);clip-path:polygon(4px 0,calc(100% - 4px) 0,calc(100% - 4px) 2px,100% 2px,100% calc(100% - 8px),calc(100% - 2px) calc(100% - 8px),calc(100% - 2px) calc(100% - 6px),22px calc(100% - 6px),16px 100%,17px calc(100% - 6px),2px calc(100% - 6px),2px calc(100% - 8px),0 calc(100% - 8px),0 2px,4px 2px);display:flex;justify-content:center;padding-top:3px;box-sizing:border-box;font:700 22px/1 ui-monospace,Menlo,monospace;color:rgb(39,39,41);animation:pop 550ms var(--ease-expressive) both}
+.puz .e.a,.puz .e.b{animation:bl 4.2s infinite,lk 5s var(--ease-expressive) infinite}
+@keyframes bl{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.1)}}
+@keyframes fl{0%,100%{translate:0 0}50%{translate:0 -3px}}
+@keyframes lk{0%,40%,100%{translate:0 0}50%,85%{translate:4px -2px}}
+@keyframes wv{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.45)}}
+@keyframes pop{0%{transform:scale(.6) rotate(-6deg);opacity:0}60%{transform:scale(1.06) rotate(2deg);opacity:1}100%{transform:none}}
+</style></head><body><div class="g">
+<div><div class="f"><div class="face puz"><div class="e a"><i></i></div><div class="e b"><i></i></div><div class="dash"></div><div class="bub">?</div></div></div><div class="l">puzzled · needs input</div></div>
+<div><div class="f"><div class="face"><div class="e a"><i></i></div><div class="e b"><i></i></div><div class="dash"></div></div></div><div class="l">idle · neutral</div></div>
+<div><div class="f"><div class="face listen"><div class="e a"><i></i></div><div class="e b"><i></i></div><div class="wave"><b></b><b></b><b></b><b></b><b></b><b></b></div></div></div><div class="l">listening · slow waveform</div></div>
+<div><div class="f"><div class="face"><div class="e a"><i></i></div><div class="e b"><i></i></div><div class="wave"><b></b><b></b><b></b><b></b><b></b><b></b></div></div></div><div class="l">speaking · fast waveform</div></div>
+</div></body></html>

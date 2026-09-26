@@ -1,0 +1,110 @@
+/* attn — design tokens.
+   Curated from design-system/tokens (fig-tokens.css + attn.css), the Figma
+   "Foundations" ground truth. Keep values identical to that export; add
+   aliases here rather than inventing new colours in component CSS. */
+:root {
+  /* type families */
+  --font-brand: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-action: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-clock: "Agbalumo", "Inter Tight", cursive;
+
+  /* brand colour */
+  --attn-sky: rgb(0,159,254);
+  --attn-sky-deep: rgb(0,122,236);
+  --attn-sky-soft: rgb(124,208,255);
+  --attn-cyan: rgb(0,217,255);
+  --attn-cream: rgb(249,251,227);
+  --attn-sun: rgb(255,214,0);
+  --attn-ink: rgb(10,10,10);
+  --attn-mint: rgb(169,239,228);
+  --attn-action: rgb(0,136,255);
+  --attn-danger: rgb(255,69,59);
+  --accents-green: rgb(52,199,89);
+
+  /* surfaces */
+  --surface-canvas: rgb(240,239,234);
+  --surface-card: rgb(255,255,255);
+  --surface-settings: rgb(251,251,251);
+  --surface-subtle: rgb(248,247,243);
+  --surface-priority: rgb(16,16,18);
+  --surface-priority-raised: rgb(27,27,32);
+  --surface-widget: rgb(22,22,24);
+  --surface-confidence: rgb(169,239,228);
+  --hairline: rgb(227,225,218);
+  --bg-canvas: var(--surface-canvas);
+  --bg-card: var(--surface-card);
+  --bg-subtle: var(--surface-subtle);
+
+  /* text */
+  --text-primary: rgb(16,16,18);
+  --text-secondary: rgb(119,118,126);
+  --text-tertiary: rgb(142,142,147);
+  --text-quaternary: rgb(156,156,166);
+  --text-subtle: rgb(183,183,183);
+  --text-on-dark: rgb(255,255,255);
+  --text-on-dark-secondary: rgb(156,156,166);
+  --text-on-dark-tertiary: rgb(172,172,172);
+  --text-on-mint: rgb(11,46,40);
+  --fg-1: var(--text-primary);
+  --fg-2: var(--text-secondary);
+  --fg-3: var(--text-tertiary);
+  --fg-4: var(--text-quaternary);
+
+  /* status */
+  --status-action-needed: rgb(255,69,59);
+  --status-connected-background: rgb(229,247,235);
+  --status-connected-text: rgb(31,148,92);
+  --status-error-background: rgb(255,235,232);
+
+  /* widget tile colours (Figma device tiles + brand accents) */
+  --tile-calendar: rgb(217,236,255);
+  --tile-mail: rgb(255,229,204);
+  --tile-task: rgb(204,247,255);
+  --tile-focus: rgb(169,239,228);
+  --tile-note: rgb(249,251,227);
+  --tile-manual: rgb(232,226,255);
+
+  /* type scale (px) */
+  --fs-display: 52px; --fs-title-large: 28px; --fs-title-medium: 24px; --fs-title-small: 20px;
+  --fs-headline: 17px; --fs-body-large: 16px; --fs-body: 14px; --fs-label: 13px; --fs-caption: 12px; --fs-badge: 11px;
+
+  /* spacing (px) */
+  --sp-compact: 8px; --sp-control: 10px; --sp-card: 12px; --sp-action-x: 13px; --sp-row: 14px;
+  --sp-content: 16px; --sp-screen: 16px; --sp-screen-x: 20px; --sp-panel: 20px; --sp-section: 24px; --sp-result: 56px;
+
+  /* radii (px) */
+  --r-small: 8px; --r-medium: 12px; --r-widget-item: 16px; --r-identity: 20px; --r-priority-inner: 24px;
+  --r-card: 28px; --r-widget: 28px; --r-panel: 30px; --r-widget-large: 34px; --r-pill: 100px;
+  --r-device: 72px; --r-device-bezel: 83px;
+
+  /* gradients */
+  --grad-sky: linear-gradient(180deg, rgb(0,159,254) 0%, rgb(249,251,227) 100%);
+  --grad-sky-screen: linear-gradient(180deg, rgb(0,159,254) 0%, rgb(124,208,255) 45%, rgb(255,255,255) 100%);
+
+  /* elevation */
+  --shadow-card: 0px 4px 7.8px 0px rgba(0,0,0,0.08);
+  --shadow-widget-item: 0px 8.459px 16.494px 0px rgba(0,0,0,0.08);
+  --shadow-bevel: inset -2px 2px 1.3px 0px rgba(255,255,255,0.36), inset 0px -2px 1px 0px rgba(0,0,0,0.25);
+  --shadow-orb: inset 0px 1px 6.5px 0px rgba(89,89,89,0.25);
+
+  /* motion */
+  --dur-feedback: 120ms; --dur-micro: 200ms; --dur-content: 300ms; --dur-list: 320ms; --dur-expressive: 550ms; --stagger: 60ms;
+  --dur-leave: 360ms;
+  --dur-ambient-identity: 7500ms; --dur-ambient-a: 8500ms; --dur-ambient-b: 10500ms; --dur-ambient-c: 13000ms;
+  --ease-selection: cubic-bezier(.3,1.04,.5,1);
+  --ease-content: cubic-bezier(.3,1.08,.5,1);
+  --ease-expressive: cubic-bezier(.34,1.22,.5,1);
+  --ease-out: cubic-bezier(.2,.8,.2,1);
+}
+
+/* Tile colour by item type — used by both the device and the Control Centre. */
+[data-type="calendar"] { --tile: var(--tile-calendar); }
+[data-type="mail"]     { --tile: var(--tile-mail); }
+[data-type="task"]     { --tile: var(--tile-task); }
+[data-type="focus"]    { --tile: var(--tile-focus); }
+[data-type="note"]     { --tile: var(--tile-note); }
+[data-type="manual"]   { --tile: var(--tile-manual); }
+
+/* Brand wordmark: white bubble letters with an ink outline, painted from one path. */
+.attn-wordmark { display: block; height: 100%; width: auto; overflow: visible; }
+.attn-wordmark path { fill: #fff; stroke: var(--attn-ink); stroke-width: 6; stroke-linejoin: round; paint-order: stroke; }

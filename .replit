@@ -1,0 +1,18 @@
+# Replit configuration — import this repo on replit.com and press Run.
+run = "npm start"
+entrypoint = "server.js"
+modules = ["nodejs-22"]
+
+[nix]
+channel = "stable-24_11"
+
+[deployment]
+# Autoscale deployments have an ephemeral disk: the Control Centre keeps a local
+# backup of your setup and restores it automatically after a cold start.
+# Switch to a Reserved VM if you want data/state.json to survive restarts on disk.
+run = ["sh", "-c", "npm start"]
+deploymentTarget = "autoscale"
+
+[[ports]]
+localPort = 3000
+externalPort = 80
