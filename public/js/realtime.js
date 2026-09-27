@@ -31,7 +31,7 @@
  */
 import { api } from './api.js';
 import { normalizeState } from './state.js';
-import { splitWake } from './wake.js';
+import { splitWake, endIntent } from './wake.js';
 import { createReminderScheduler } from './reminders.js';
 import { createFocusPlayer } from './focus-player.js';
 
@@ -74,6 +74,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   let transcriptTimer = null;
   let askedQuestion = false;
   let reminderSpeaking = false;
+  let closing = false; // a goodbye is being said; when it ends, straight back to passive (no follow-up window)
   const events = []; // debug ring buffer
 
   // ---- spoken reminders + focus audio are driven from the shared state
@@ -322,22 +323,59 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     const text = (transcript || '').trim();
     if (!text) return;
     log('transcript:', JSON.stringify(text));
-    const { woke, command } = splitWake(text, name, { strict: true });
+    const { woke, command, heard } = splitWake(text, name, { strict: true });
     if (assistantMode === 'passive') {
       if (!woke) {
         console.log('[Wake] ignored ambient transcript');
         if (itemId) send({ type: 'conversation.item.delete', item_id: itemId }); // keep Andrew's context clean
         return;
       }
-      console.log('[Wake] detected:', JSON.stringify(text.slice(0, text.length - command.length).trim()));
+      console.log('[Wake] detected:', JSON.stringify(heard || text));
       if (!command) { openActiveWindow(ACTIVE_WINDOW_MS, 'wake phrase only'); set('listening'); return; }
       console.log('[Wake] extracted command:', JSON.stringify(command));
       respondTo(text);
       return;
     }
-    // active: follow-up, correction or clarification answer; a wake phrase is optional
+    // active: 1) an end/dismiss phrase closes Andrew locally (no model, no tools)
+    const end = endIntent(text, name, { questionPending: askedQuestion });
+    if (end) {
+      console.log(`[Andrew] ${end.kind === 'dismiss' ? 'dismissed' : 'conversation closed'} by the user:`, JSON.stringify(text));
+      endAndrewConversation({ kind: end.kind, itemId });
+      return;
+    }
+    // 2) follow-up, correction or clarification answer; a wake phrase is optional
     if (woke && !command) { openActiveWindow(askedQuestion ? CLARIFY_WINDOW_MS : ACTIVE_WINDOW_MS, 'wake phrase again'); set('listening'); return; }
     respondTo(text);
+  }
+
+  /**
+   * Close the voice interaction and go back to the dashboard, keeping the session connected and
+   * the wake gate armed. 'dismiss' is silent; 'close' lets Andrew say one word ("Anytime.") first.
+   */
+  function endAndrewConversation({ kind = 'close', itemId = null } = {}) {
+    clearTimeout(activeTimer);
+    clearTimeout(idleTimer);
+    clearTimeout(transcriptTimer);
+    clearWatchdog();
+    askedQuestion = false;
+    toolChanged = false;
+    pendingHighlights = { itemIds: [], modules: [] };
+    userText = '';
+    if (speaking) { send({ type: 'output_audio_buffer.clear' }); speaking = false; }
+    if (status === 'processing') send({ type: 'response.cancel' }); // harmless when nothing is in flight
+    if (kind === 'dismiss') {
+      if (itemId) send({ type: 'conversation.item.delete', item_id: itemId }); // it was never for him
+      closing = false;
+      setMode('passive', 'dismissed');
+      set('idle');
+      return;
+    }
+    closing = true;
+    replyText = '';
+    set('processing', { transcript: '' });
+    armWatchdog(PROCESSING_WATCHDOG_MS);
+    const sent = send({ type: 'response.create', response: { tool_choice: 'none', output_modalities: ['audio'], max_output_tokens: 40, instructions: 'The user is ending the conversation. Reply with one or two words only, such as "Anytime." or "You\'re welcome." or "Bye." Nothing else.' } });
+    if (!sent) { closing = false; setMode('passive', 'closed'); set('idle'); }
   }
 
   // ================================================================ events → UI + tools
@@ -406,6 +444,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
         onResponseDone(ev.response || {});
         break;
       case 'error':
+        if (ev.error?.code === 'response_cancel_not_active') break;
         log('error event:', ev.error?.type || '', ev.error?.code || '', ev.error?.message || '');
         if (status === 'processing' || status === 'listening') showError("I couldn't process that. Try again.");
         break;
@@ -461,6 +500,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   function afterResponse() {
     clearTimeout(idleTimer);
     if (reminderSpeaking) { reminderSpeaking = false; setMode('passive', 'reminder spoken'); toolChanged = false; pendingHighlights = { itemIds: [], modules: [] }; set('idle'); return; }
+    if (closing) { closing = false; askedQuestion = false; toolChanged = false; pendingHighlights = { itemIds: [], modules: [] }; setMode('passive', 'closed'); set('idle'); return; }
     askedQuestion = /\?\s*$/.test(replyText.trim());
     if (askedQuestion) {
       // a question: stay forward with it on the face and wait for the answer
@@ -503,6 +543,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     toolChanged = false;
     askedQuestion = false;
     reminderSpeaking = false;
+    closing = false;
     setMode('passive', 'error');
     set('error', { text: message });
     idleTimer = setTimeout(() => { if (status === 'error') set('idle'); }, ERROR_LINGER_MS);
@@ -566,6 +607,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     get status() { return status; },
     get mode() { return assistantMode; },
     get reminders() { return reminders.pending; },
+    endConversation: (kind = 'dismiss') => endAndrewConversation({ kind }),
     speakReminder,
     get connected() { return connected; },
     get events() { return events; },
