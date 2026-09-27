@@ -5,10 +5,10 @@
 ```
 Control Centre (laptop)  →  shared state (one JSON object)  →  Device (phone)
                                        ↑
-            Voice / typed command  →  Gemini  →  validated actions
+        Voice (OpenAI Realtime, WebRTC)  →  function calls  →  validated actions
 ```
 
-Change something in the Control Centre and it appears on the phone within a second or two. Tap the face on the phone and talk: attn ("Andrew") turns natural language into the same state changes. No real integrations yet.
+Change something in the Control Centre and it appears on the phone within a second or two. Say "Hey Andrew, …" to the phone and Andrew (OpenAI Realtime, speech to speech) turns it into the same state changes and answers in his own voice. No real integrations yet.
 
 ## Run it locally
 
@@ -36,19 +36,17 @@ The server prints a `http://<your-lan-ip>:3000/device` URL at startup — open t
 
 No WebSockets, no database. Polling is plenty at this size.
 
-## Talk to attn (voice + AI)
+## Talk to attn (voice)
 
-Leave `/device` open and say **"Hey Andrew, …"**. attn:
+Production voice is **OpenAI Realtime over WebRTC** (`VOICE_PROVIDER=openai`, the default):
 
-1. keeps a foreground speech-recognition loop running (Web Speech API) and looks for the wake phrase locally; nothing is sent, spoken or changed until it hears "Hey Andrew" (also "Andrew", "OK Andrew"). A bare "Hey Andrew" makes him listen for about nine seconds; a command in the same sentence runs straight away,
-2. POSTs the transcript to `/api/assistant/command` with the current time, timezone and locale,
-3. asks Gemini which of the whitelisted **functions** to call (the action registry plus `clarify` and `respond`), never free-form parsing,
-4. validates every action, runs the whitelisted ones through `public/js/actions.js` (the same functions the Control Centre uses), saves through the normal persistence path,
-5. sends the real results back to Gemini for one short spoken sentence (with a deterministic fallback that never hides a failure), applies the new state on the device immediately, pulses the cards it touched, and speaks (SpeechSynthesis).
+1. On the first visit tap **Enable Andrew** once: the browser asks for the microphone, the page fetches a short-lived client secret from `POST /api/realtime/token` (the permanent `OPENAI_API_KEY` never leaves the server), and a WebRTC session opens with Andrew's instructions, voice and tools baked in.
+2. The session stays connected while the page is visible. OpenAI's semantic turn detection listens; you speak naturally. "Hey Andrew" is treated as an address, never as the request; a command in the same sentence runs straight away, and follow-ups such as "Actually make that noon" or "Five" need no wake phrase because the conversation context lives in the session.
+3. When the model decides on an action it calls one of the tools built from the real registry (`public/js/actions.js`). The device posts the call to `POST /api/realtime/tool`, which validates it (times in your timezone), runs the shared mutation, saves the state, and returns the result (with item ids) as `function_call_output`. Only then does Andrew speak the confirmation, in OpenAI's voice.
+4. The face states come from real events: speech start → listening, speech stop → processing, tool calls → processing, audio playback start → speaking, playback end → success with the changed cards highlighted. Interruptions are handled by the session (barge-in).
+5. If the connection drops the device reconnects with backoff; if the page is hidden the session stops and resumes when it is visible again.
 
-After a reply, corrections such as "Actually make that noon" or answers to a question ("Five") need no wake phrase. The microphone is off while Andrew speaks so he cannot hear himself, recognition restarts itself whenever Chrome ends it, and it pauses while the page is hidden. The first visit needs one tap on **Enable Andrew** (microphone permission and speech unlock); after that it is hands-free while the page stays open. `/device?debug=1` adds a typed command box that uses the exact same pipeline, plus `window.attnDebug.simulate("Hey Andrew, …")` in the console. `lib/assistant.js` holds the prompt, the reply schema, validation and a ten-minute conversation memory per device, enough for "What time today?" → "Five." and "Actually make that 3:30."
-
-**What the assistant can do** (`ASSISTANT_ACTIONS` in `public/js/actions.js`): add an item to Pay attention to / Upcoming / Important email (with a resolved time), update or remove an item, show or hide a module, turn Focus mode on or off with a label and optional time block, write the Quick note, and answer questions about what is on the device.
+Tools exposed: `add_item`, `update_item`, `remove_item`, `set_module_visibility`, `set_focus`, `set_note`, plus read-only `query_attn_state` and `highlight_items`.
 
 **Intentionally unsupported** (Andrew says so instead of pretending): sending or reading email, real calendars, playing music or audio, alarms/notifications, calls, browsing, long-term memory.
 
@@ -56,36 +54,33 @@ After a reply, corrections such as "Actually make that noon" or answers to a que
 
 | Variable | Required | What |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | yes | Server-side only. Never shipped to the browser, never committed. |
-| `GEMINI_MODEL` | no | Default `gemini-3.8-flash`. `gemini-3.5-flash-lite` is the cheaper/faster option; `gemini-flash-latest` always points at the newest Flash. |
-| `GEMINI_FALLBACK_MODEL` | no | Default `gemini-3.5-flash-lite`: tried once when the main model answers 429 (quota). `0` disables. |
-| `GEMINI_FOLLOW_UP` | no | `0` skips the second wording request per command (halves quota use); attn then speaks a plain confirmation. |
-| `GEMINI_THINKING_LEVEL` | no | `LOW` (default), `MEDIUM`, `HIGH` or `off`. Lower is faster. |
-| `ASSISTANT_NAME` | no | Default `Andrew`. Used in speech, on screen and as an optional wake word. |
-| `ATTN_ASSISTANT_MOCK` | no | `1` answers with a built-in stub instead of Gemini (dev/testing only). |
+| `OPENAI_API_KEY` | yes | Server-side only. Never shipped to the browser, never committed. |
+| `VOICE_PROVIDER` | no | `openai` (default) or `legacy` (Chrome speech + Gemini, rollback only; never both). |
+| `OPENAI_REALTIME_MODEL` | no | Default `gpt-realtime-2.1`. |
+| `OPENAI_REALTIME_VOICE` | no | Default `cedar`; `marin` is the other natural option. |
+| `OPENAI_REALTIME_VAD` | no | `semantic` (default, eagerness low) or `server` (700 ms silence) if the phone cuts you off. |
+| `OPENAI_REALTIME_TRANSCRIBE` | no | Input transcription model for logs and the subtle on-screen transcript; `off` disables. |
 
-**Get a key:** open [Google AI Studio](https://aistudio.google.com/apikey), sign in with a Google account, click *Create API key* and copy it. The free tier costs nothing; on the free tier Google may use prompts and responses to improve its products, so keep demo content non-sensitive (paid-tier data is not used that way).
+**On Render:** Dashboard → the `attn` service → **Environment** → add `OPENAI_API_KEY` (value = your key) and `VOICE_PROVIDER` = `openai` → *Save Changes*. Render restarts the service. `GET /api/assistant/status` shows `realtime.configured: true` once it is picked up.
 
-**Locally:** copy `.env.example` to `.env` and paste the key after `GEMINI_API_KEY=`.
+**Locally:** copy `.env.example` to `.env` and paste the key. `node scripts/realtime-smoke.mjs` runs the test sentences through a real Realtime session in text mode (no microphone) against a running server.
 
-**On Render:** Dashboard → the `attn` service → **Environment** → *Add Environment Variable* → key `GEMINI_API_KEY`, value = the key → *Save Changes*. Render restarts the service automatically. `GET /api/assistant/status` shows `configured: true` once it is picked up.
+### Legacy voice stack (rollback)
 
-**Free-tier limits:** per-model requests-per-minute and per-day caps apply and change over time; see your live numbers at [aistudio.google.com/rate-limit](https://aistudio.google.com/rate-limit). When a cap is hit the API answers 429 and Andrew says he is getting too many requests. Preview models have lower limits than stable ones; stay on a stable Flash model for demos.
+`VOICE_PROVIDER=legacy` switches the device back to the previous pipeline: Chrome SpeechRecognition with a local wake phrase → `POST /api/assistant/command` (Gemini function calling) → browser speech synthesis. It needs `GEMINI_API_KEY`. It exists only until the Realtime path is verified on the phone.
 
 ### Try saying
 
-- "Hey Andrew, remind me to reply to Sarah's email at 11."
-- "Get me to pay attention to my design review at 2:30 and add it to my calendar."
-- "Actually make that 3:30."
-- "Remind me to book my flight to Frankfurt later today." → Andrew asks for a time → "Five."
-- "What should I pay attention to over the next three hours?"
-- "Give me an hour of focus starting at ten." · "Play some deep focus music."
-- "Show me my calendar stuff." · "Hide the email things."
-- "Note that the Wi-Fi password is on the fridge."
+- "Hey Andrew, remind me to reply to Sarah's email at 11." then "Actually make that noon."
+- "Hey Andrew, get me to pay attention to my design review at 2:30 and add it to my calendar."
+- "Hey Andrew, remind me to book my flight to Frankfurt later today." → "What time today?" → "Five."
+- "Hey Andrew, what should I pay attention to over the next three hours?"
+- "Hey Andrew, give me an hour of focus starting at ten." · "Hey Andrew, play some deep focus music."
+- "Hey Andrew, hide the email things." · "Hey Andrew, put a note saying call Mum." · "Hey Andrew, I'm done with the design review."
 
 ### Browser notes
 
-Speech recognition needs Chrome (Android or desktop) and a network connection; Firefox and some WebViews have none, so the typed box is the fallback. Voices for speech synthesis vary per phone; attn prefers a natural English voice and falls back to the default. Microphone permission is asked on the first tap.
+Needs a browser with WebRTC and microphone access (Chrome on Android is the target). The first tap also unlocks audio playback. Recognition and speech both run on OpenAI, so nothing depends on the phone's speech engines. `/device?debug=1` adds a typed box that sends text into the same Realtime conversation plus `window.attnDebug` (recent events, `say("…")`, `simulateEvent`).
 
 ## Where state lives
 
@@ -99,7 +94,8 @@ Speech recognition needs Chrome (Android or desktop) and a network connection; F
 ```
 server.js                  Express: static files + /api/state + /api/status + /api/assistant/* + JSON persistence
 lib/assistant.js           AI command router: prompt, function declarations, validation, execution, conversation memory
-lib/gemini.js              the only file that talks to Gemini (function calling, key from env)
+lib/realtime.js            OpenAI Realtime bridge: client secrets, session config (instructions, voice, VAD, tools), tool execution
+lib/gemini.js              legacy provider (VOICE_PROVIDER=legacy only)
 lib/time.js                local wall time ↔ instants, short labels ("2:30 PM", "Tomorrow, 9:00 AM")
 public/
   control.html / device.html / index.html
@@ -112,7 +108,8 @@ public/
   js/api.js                fetch wrapper with timeouts
   js/render-device.js      the device renderer (used by /device AND the live preview)
   js/device.js             device boot: polling, clock, PWA install, service worker, assistant
-  js/assistant.js          tap-to-talk, speech in/out, the command pipeline states
+  js/realtime.js           the production voice client: WebRTC session, real events → UI states, tool bridge
+  js/assistant.js          legacy voice client (Chrome speech + Gemini), rollback only
   js/control.js            Control Centre: sources, modules, autosave, status, preview
   js/icons.js  js/brand.js tile glyphs, wordmark
   manifest.json / service-worker.js / icons/

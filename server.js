@@ -10,11 +10,12 @@
  * The device polls GET /api/state every ~1.5s. The Control Centre POSTs the
  * whole state whenever something changes. Last write wins — simple and reliable.
  *
- * Voice/AI: POST /api/assistant/command takes a transcript (or typed text).
- * lib/assistant.js asks Gemini (function calling) for actions, validates them,
- * runs them through public/js/actions.js and saves via applyState(). The device
- * applies the returned state immediately; the Control Centre sees it on its next
- * poll. The Gemini API key never leaves the server.
+ * Voice (VOICE_PROVIDER=openai, default): the device talks to OpenAI Realtime
+ * over WebRTC using a short-lived client secret from POST /api/realtime/token;
+ * the model's function calls are executed by POST /api/realtime/tool through
+ * public/js/actions.js + applyState(). Legacy (VOICE_PROVIDER=legacy):
+ * Chrome speech → POST /api/assistant/command (Gemini) — rollback only.
+ * No permanent API key ever leaves the server.
  */
 import './lib/env.js'; // loads a local .env first (optional)
 import express from 'express';
@@ -26,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { normalizeState, DEFAULT_STATE } from './public/js/state.js';
 import { handleCommand, ASSISTANT_NAME } from './lib/assistant.js';
 import { isConfigured, isMock, getModel, PROVIDER } from './lib/gemini.js';
+import * as realtime from './lib/realtime.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -106,7 +108,55 @@ app.get('/api/status', (req, res) => {
 
 // ------------------------------------------------------------------ assistant
 app.get('/api/assistant/status', (req, res) => {
-  noStore(res).json({ ok: true, name: ASSISTANT_NAME, configured: isConfigured(), mock: isMock(), provider: isMock() ? 'mock' : PROVIDER, model: isMock() ? 'mock' : getModel(), commit: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null, node: process.version });
+  const voiceProvider = realtime.getProvider() === 'legacy' ? 'legacy' : 'openai';
+  noStore(res).json({
+    ok: true,
+    name: ASSISTANT_NAME,
+    voiceProvider,
+    realtime: { configured: realtime.isConfigured(), model: realtime.getModel(), voice: realtime.getVoice() },
+    // legacy (Gemini) interpretation, kept for VOICE_PROVIDER=legacy
+    configured: voiceProvider === 'openai' ? realtime.isConfigured() : isConfigured(),
+    mock: isMock(),
+    provider: voiceProvider === 'openai' ? 'openai-realtime' : (isMock() ? 'mock' : PROVIDER),
+    model: voiceProvider === 'openai' ? realtime.getModel() : (isMock() ? 'mock' : getModel()),
+    commit: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null,
+    node: process.version,
+  });
+});
+
+// ------------------------------------------------------------- OpenAI Realtime bridge
+app.post('/api/realtime/token', async (req, res) => {
+  if (realtime.getProvider() === 'legacy') return noStore(res).status(400).json({ ok: false, error: 'provider_disabled', message: 'VOICE_PROVIDER is legacy' });
+  try {
+    const secret = await realtime.createClientSecret(req.body || {});
+    noStore(res).json({ ok: true, ...secret, name: ASSISTANT_NAME });
+  } catch (err) {
+    const status = err.status && err.status >= 400 && err.status < 600 ? err.status : 502;
+    console.warn('[Realtime] token:', err.code || 'error', err.message);
+    noStore(res).status(status).json({ ok: false, error: err.code || 'error', message: err.message });
+  }
+});
+
+app.post('/api/realtime/tool', (req, res) => {
+  const { name, arguments: rawArgs, call_id: callId } = req.body || {};
+  if (typeof name !== 'string') return noStore(res).status(400).json({ ok: false, error: 'bad_request' });
+  let args = rawArgs;
+  if (typeof rawArgs === 'string') { try { args = JSON.parse(rawArgs || '{}'); } catch { args = null; } }
+  if (args !== null && typeof args !== 'object') args = null;
+  console.log(`[Realtime] tool: ${name} ${JSON.stringify(args)}`);
+  if (args === null) return noStore(res).json({ ok: true, call_id: callId, output: { success: false, error: 'The arguments were not valid JSON.' }, changed: false, highlightItemIds: [] });
+  try {
+    const result = realtime.executeTool({ name, args }, { getState: () => state, applyState }, req.body || {});
+    console.log(`[Realtime] action result: ${result.output.success ? 'success' : 'failed'} ${result.output.message || result.output.error || ''}`);
+    noStore(res).json({ ok: true, call_id: callId, ...result });
+  } catch (err) {
+    console.error('[Realtime] tool crashed:', err);
+    noStore(res).json({ ok: true, call_id: callId, output: { success: false, error: 'attn could not run that action.' }, changed: false, highlightItemIds: [] });
+  }
+});
+
+app.post('/api/realtime/instructions', (req, res) => {
+  noStore(res).json({ ok: true, instructions: realtime.buildInstructions(realtime.timeContext(req.body || {})) });
 });
 
 app.post('/api/assistant/command', async (req, res, next) => {
@@ -149,6 +199,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`[attn]   Control Centre  http://localhost:${PORT}/control`);
   console.log(`[attn]   Device          http://localhost:${PORT}/device`);
   for (const ip of lan) console.log(`[attn]   Phone on same Wi-Fi  http://${ip}:${PORT}/device`);
-  const mode = isMock() ? 'MOCK mode (ATTN_ASSISTANT_MOCK=1)' : isConfigured() ? `ready · ${getModel()}` : 'not configured — set GEMINI_API_KEY';
-  console.log(`[attn] assistant "${ASSISTANT_NAME}": ${mode}`);
+  const voice = realtime.getProvider() === 'legacy'
+    ? `legacy (Chrome speech + ${isMock() ? 'MOCK' : isConfigured() ? getModel() : 'Gemini not configured'})`
+    : `OpenAI Realtime ${realtime.getModel()} · voice ${realtime.getVoice()} · ${realtime.isConfigured() ? 'ready' : 'NOT configured — set OPENAI_API_KEY'}`;
+  console.log(`[attn] assistant "${ASSISTANT_NAME}": ${voice}`);
 });

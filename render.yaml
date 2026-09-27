@@ -10,7 +10,15 @@ services:
     autoDeploy: true
     healthCheckPath: /api/status
     envVars:
-      - key: GEMINI_API_KEY      # set in the Render dashboard (Environment tab); never in git
+      - key: OPENAI_API_KEY      # set in the Render dashboard (Environment tab); never in git
+        sync: false
+      - key: VOICE_PROVIDER
+        value: openai
+      - key: OPENAI_REALTIME_MODEL
+        value: gpt-realtime-2.1
+      - key: OPENAI_REALTIME_VOICE
+        value: cedar
+      - key: GEMINI_API_KEY      # legacy voice stack only (VOICE_PROVIDER=legacy)
         sync: false
       - key: GEMINI_MODEL
         value: gemini-3.8-flash

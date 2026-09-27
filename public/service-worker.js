@@ -8,11 +8,11 @@
  *     opens the device (which then shows "Reconnecting…").
  * Bump VERSION when you want every installed device to drop its old shell.
  */
-const VERSION = 'attn-shell-v4';
+const VERSION = 'attn-shell-v5';
 const SHELL = [
   '/', '/control', '/device',
   '/css/tokens.css', '/css/shared.css', '/css/device.css', '/css/control.css',
-  '/js/api.js', '/js/state.js', '/js/actions.js', '/js/wake.js', '/js/icons.js', '/js/brand.js', '/js/render-device.js', '/js/device.js', '/js/assistant.js', '/js/control.js',
+  '/js/api.js', '/js/state.js', '/js/actions.js', '/js/wake.js', '/js/icons.js', '/js/brand.js', '/js/render-device.js', '/js/device.js', '/js/realtime.js', '/js/assistant.js', '/js/control.js',
   '/assets/attn-logo.svg', '/manifest.json',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png', '/icons/icon-180.png',
 ];

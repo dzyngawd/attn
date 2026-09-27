@@ -16,7 +16,15 @@ async function request(url, options = {}) {
   options.signal?.addEventListener('abort', () => controller.abort(), { once: true });
   try {
     const res = await fetch(url, { cache: 'no-store', ...options, signal: controller.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      // keep the server's error code/message so callers can react (e.g. not_configured vs. a blip)
+      let body = null;
+      try { body = await res.json(); } catch { /* not JSON */ }
+      const err = new Error(body?.message || body?.spokenResponse || `HTTP ${res.status}`);
+      err.status = res.status;
+      err.code = body?.error || `http_${res.status}`;
+      throw err;
+    }
     return await res.json();
   } finally {
     clearTimeout(timer);
@@ -41,4 +49,8 @@ export const api = {
     signal,
   }),
   assistantStatus: () => request('/api/assistant/status'),
+  /** OpenAI Realtime bridge: short-lived client secret, tool execution, refreshed instructions. */
+  realtimeToken: (payload) => request('/api/realtime/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), timeout: 20000 }),
+  realtimeTool: (payload) => request('/api/realtime/tool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), timeout: 10000 }),
+  realtimeInstructions: (payload) => request('/api/realtime/instructions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
 };
