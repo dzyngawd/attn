@@ -37,7 +37,7 @@ export const api = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-    timeout: 30000,
+    timeout: 25000, // the server answers within ~20 s (lib/gemini.js OVERALL_MS), so this only guards a dead connection
     signal,
   }),
   assistantStatus: () => request('/api/assistant/status'),
