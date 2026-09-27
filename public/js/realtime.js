@@ -94,13 +94,26 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
       dc = pc.createDataChannel('oai-events');
       dc.onmessage = (e) => { try { handleEvent(JSON.parse(e.data)); } catch (err) { log('bad event payload', err.message); } };
       dc.onclose = () => onDisconnected('data channel closed');
-      const opened = new Promise((resolve, reject) => { dc.onopen = resolve; setTimeout(() => reject(new Error('data channel did not open')), 15000); });
+      let openTimer = null;
+      const opened = new Promise((resolve, reject) => { dc.onopen = resolve; openTimer = setTimeout(() => reject(new Error('data channel did not open')), 15000); });
+      opened.catch(() => { /* surfaced by the await below, or irrelevant once we failed earlier */ });
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       const res = await fetch(OPENAI_CALLS_URL, { method: 'POST', headers: { Authorization: `Bearer ${token.value}`, 'Content-Type': 'application/sdp' }, body: offer.sdp });
-      if (!res.ok) throw Object.assign(new Error(`OpenAI call setup failed (HTTP ${res.status})`), { code: res.status === 401 ? 'expired' : 'sdp' });
+      if (!res.ok) {
+        let detail = '';
+        let errCode = '';
+        try { const body = await res.text(); try { const j = JSON.parse(body); detail = j.error?.message || body; errCode = j.error?.code || j.error?.type || ''; } catch { detail = body; } } catch { /* no body */ }
+        log(`call setup failed: HTTP ${res.status} ${errCode} ${detail.slice(0, 200)}`);
+        const code = res.status === 401 ? 'expired'
+          : (res.status === 429 && /quota|billing|insufficient/i.test(errCode + ' ' + detail)) ? 'quota'
+          : res.status === 429 ? 'rate_limit'
+          : res.status === 403 ? 'forbidden' : 'sdp';
+        throw Object.assign(new Error(`OpenAI call setup failed (HTTP ${res.status}): ${detail.slice(0, 200)}`), { code, status: res.status });
+      }
       await pc.setRemoteDescription({ type: 'answer', sdp: await res.text() });
       await opened;
+      clearTimeout(openTimer);
       connected = true;
       connecting = false;
       reconnectAttempt = 0;
@@ -137,6 +150,14 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
       const text = err.name === 'NotFoundError' ? 'No microphone found.' : err.name === 'TimeoutError' ? 'Microphone permission was not granted. Tap to try again.' : 'Microphone blocked. Allow it in the browser’s site settings, then tap here.';
       device.setSetup({ text, action: `Enable ${name}` });
       return;
+    }
+    if (err.code === 'quota' || err.code === 'forbidden') {
+      enabled = false;
+      device.setSetup({ text: err.code === 'quota' ? 'OpenAI refused the session: the account has no credit or quota for Realtime. Add billing at platform.openai.com, then tap here.' : 'OpenAI refused the session (403). Check the key’s project permissions, then tap here.', action: 'Retry' });
+      return;
+    }
+    if (err.code === 'rate_limit') {
+      reconnectAttempt = Math.max(reconnectAttempt, 4); // jump to the long delays: hammering a rate limit makes it worse
     }
     if (['not_configured', 'auth', 'provider_disabled', 'bad_request'].includes(err.code)) {
       // a configuration problem: retrying will not help, wait for a tap
