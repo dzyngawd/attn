@@ -1,15 +1,22 @@
 /**
  * attn — Deep Focus audio through the official YouTube IFrame Player API.
  *
- * One reusable YT.Player, mounted inside the Focus card (visible, never hidden
- * offscreen, controls never covered). The API script is loaded once, only when
- * focus music is first needed. Nothing is downloaded or cached locally.
+ * ONE reusable YT.Player, created early (during the Enable Andrew tap) inside the
+ * persistent player slot of the device screen; never destroyed between tracks.
+ * Playback is only believed when the player itself reports PLAYING: if nothing
+ * plays within a few seconds of loadVideoById/playVideo (or the player fires
+ * onAutoplayBlocked) the caller gets onBlocked and shows the one-tap fallback.
+ * Nothing is downloaded or cached locally; no account, cookies or Premium involved.
  *
  *   const player = createFocusPlayer({ onBlocked, onState, log });
- *   player.play(mountEl, videoId)   // load + play (recreates the player if the mount changed)
- *   player.pause() / player.stop()
+ *   player.prime()                  // load the IFrame API script (cheap, do it on the user's tap)
+ *   player.mount(mountEl)           // create the player in its slot (no video yet)
+ *   player.play(mountEl, videoId)   // load + play (reuses the player when the slot is unchanged)
+ *   player.resume() / player.pause() / player.stop()
  */
 const API_SRC = 'https://www.youtube.com/iframe_api';
+const PLAY_TIMEOUT_MS = 6000; // no PLAYING state this long after asking → treat as blocked
+export const STATE_NAMES = { '-1': 'unstarted', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'cued' };
 let apiPromise = null;
 
 function loadApi() {
@@ -21,9 +28,9 @@ function loadApi() {
     const s = document.createElement('script');
     s.src = API_SRC;
     s.async = true;
-    s.onerror = () => reject(new Error('YouTube IFrame API failed to load'));
+    s.onerror = () => { apiPromise = null; reject(new Error('YouTube IFrame API failed to load')); };
     document.head.appendChild(s);
-    setTimeout(() => reject(new Error('YouTube IFrame API timed out')), 15000);
+    setTimeout(() => reject(new Error('YouTube IFrame API timed out')), 20000);
   });
   return apiPromise;
 }
@@ -34,7 +41,18 @@ export function createFocusPlayer({ onBlocked = () => {}, onState = () => {}, lo
   let host = null;       // the div the API replaces with the iframe
   let currentId = null;  // the track attn wants (set as soon as play() is called)
   let loadedId = null;   // the track the player actually has
-  let ready = null;      // pending/ready player for the current mount (so repeated polls never rebuild it)
+  let ready = null;      // pending/ready player for the current mount (repeated polls never rebuild it)
+  let playing = false;   // what the player last reported
+  let playTimer = null;
+
+  function armPlayTimer(why) {
+    clearTimeout(playTimer);
+    playTimer = setTimeout(() => {
+      if (playing || !currentId) return;
+      log(`no playback ${PLAY_TIMEOUT_MS / 1000} s after ${why} — treating it as blocked`);
+      onBlocked();
+    }, PLAY_TIMEOUT_MS);
+  }
 
   async function ensure(mountEl) {
     if (ready && mount === mountEl && mountEl.isConnected) return ready;
@@ -44,39 +62,52 @@ export function createFocusPlayer({ onBlocked = () => {}, onState = () => {}, lo
       const YT = await loadApi();
       host = document.createElement('div');
       mountEl.replaceChildren(host);
+      log('creating the YouTube player');
       return new Promise((resolve) => {
-      player = new YT.Player(host, {
-        width: '100%',
-        height: '100%',
-        playerVars: { playsinline: 1, rel: 0, modestbranding: 1, origin: location.origin },
-        events: {
-          onReady: () => { log('YouTube player ready'); resolve(player); },
-          onStateChange: (e) => onState(e.data),
-          onAutoplayBlocked: () => { log('autoplay blocked by the browser'); onBlocked(); },
-          onError: (e) => log('YouTube player error', e.data),
-        },
-      });
+        player = new YT.Player(host, {
+          width: '100%',
+          height: '100%',
+          playerVars: { playsinline: 1, rel: 0, modestbranding: 1, origin: location.origin },
+          events: {
+            onReady: () => { log('YouTube player ready'); resolve(player); },
+            onStateChange: (e) => {
+              const code = e.data;
+              log('player state:', STATE_NAMES[code] ?? code);
+              playing = code === 1;
+              if (playing) clearTimeout(playTimer);
+              onState(code);
+            },
+            onAutoplayBlocked: () => { log('onAutoplayBlocked: the browser refused to start audio without a tap'); clearTimeout(playTimer); onBlocked(); },
+            onError: (e) => { log('YouTube player error', e.data); clearTimeout(playTimer); onBlocked(); },
+          },
+        });
       });
     })();
+    ready.catch((err) => { log('player could not be created:', err.message); ready = null; });
     return ready;
   }
 
   return {
+    prime() { return loadApi().then(() => log('IFrame API loaded'), (err) => log(err.message)); },
+    mount(mountEl) { return ensure(mountEl); },
     async play(mountEl, videoId) {
       currentId = videoId;
       const p = await ensure(mountEl);
       if (currentId !== videoId) return; // superseded while the API was loading
-      if (loadedId !== videoId) { loadedId = videoId; log('loading track', videoId); p.loadVideoById(videoId); }
-      else p.playVideo();
+      if (loadedId !== videoId) { loadedId = videoId; playing = false; log('loadVideoById', videoId); p.loadVideoById(videoId); }
+      else { log('playVideo', videoId); p.playVideo(); }
+      armPlayTimer(loadedId === videoId ? 'loadVideoById' : 'playVideo');
     },
-    resume() { try { player?.playVideo(); } catch { /* ignore */ } },
+    resume() { try { log('playVideo (user tap)'); player?.playVideo(); armPlayTimer('the tap'); } catch { /* ignore */ } },
     pause() { try { player?.pauseVideo(); } catch { /* ignore */ } },
-    stop() { try { player?.stopVideo(); } catch { /* ignore */ } currentId = null; loadedId = null; },
+    stop() { clearTimeout(playTimer); try { player?.stopVideo(); } catch { /* ignore */ } currentId = null; loadedId = null; playing = false; },
     get videoId() { return currentId; },
+    get playing() { return playing; },
     get mounted() { return Boolean(ready && mount && mount.isConnected); },
   };
 
   function destroy() {
+    clearTimeout(playTimer);
     try { player?.destroy(); } catch { /* ignore */ }
     player = null;
     mount = null;
@@ -84,5 +115,6 @@ export function createFocusPlayer({ onBlocked = () => {}, onState = () => {}, lo
     currentId = null;
     loadedId = null;
     ready = null;
+    playing = false;
   }
 }

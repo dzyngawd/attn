@@ -142,21 +142,31 @@ export function markReminderTriggered(state, { itemId } = {}) {
 }
 
 /** Demo focus audio: the device plays the configured YouTube track; `trackId` is chosen by the caller. */
+/** Request a focus track. currentTrackId = what the device should play; musicPlaying only becomes true once the device reports real playback. */
 export function startFocusMusic(state, { trackId } = {}) {
   const focus = state.modules.focus;
   if (!trackId) return { ok: false, message: 'No focus track configured.' };
   focus.enabled = true;
-  focus.musicPlaying = true;
+  focus.musicPlaying = false;
   focus.currentTrackId = String(trackId).slice(0, 20);
   if (!focus.startedAt) focus.startedAt = new Date().toISOString();
-  return { ok: true, message: 'Focus audio started.', module: 'focus' };
+  return { ok: true, message: 'Focus audio starting on the device.', module: 'focus' };
 }
 
 export function stopFocusMusic(state) {
   const focus = state.modules.focus;
-  const was = focus.musicPlaying;
+  const was = Boolean(focus.currentTrackId || focus.musicPlaying);
   focus.musicPlaying = false;
+  focus.currentTrackId = null;
   return { ok: true, message: was ? 'Focus audio stopped.' : 'No focus audio was playing.', module: 'focus' };
+}
+/** The device reports what the YouTube player is really doing (playing / not playing). */
+export function setFocusPlayback(state, { playing } = {}) {
+  const focus = state.modules.focus;
+  const on = Boolean(playing) && focus.enabled && Boolean(focus.currentTrackId);
+  const changed = focus.musicPlaying !== on;
+  focus.musicPlaying = on;
+  return { ok: true, changed, message: on ? 'Focus audio playing.' : 'Focus audio not playing.', module: 'focus' };
 }
 
 export function endFocusMode(state) {

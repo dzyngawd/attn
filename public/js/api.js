@@ -56,5 +56,6 @@ export const api = {
   /** Mark an item done (swipe on the device / Control Centre): archived under Completed. */
   completeItem: (itemId, method) => request('/api/items/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemId, method }) }),
   /** A spoken reminder fired on the device: mark it so it never fires again. */
+  focusPlayback: (playing) => request('/api/focus/playback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playing: Boolean(playing) }) }),
   reminderTriggered: (itemId) => request('/api/reminders/triggered', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemId }) }),
 };

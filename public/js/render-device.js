@@ -207,6 +207,16 @@ function isUrgent(entry, now) {
   return dt < URGENT_WINDOW_MS;
 }
 
+let deviceAudio = null; // 'loading' | 'playing' | 'blocked' | 'paused' | null — what the YouTube player really reports on this device
+function musicLabel(mod) {
+  if (!mod.currentTrackId) return '';
+  if (deviceAudio === 'blocked') return 'Tap to start focus audio';
+  if (deviceAudio === 'loading') return 'Starting focus audio…';
+  if (deviceAudio === 'paused') return 'Focus audio paused';
+  if (deviceAudio === 'playing' || mod.musicPlaying) return 'Focus audio playing';
+  return 'Focus audio';
+}
+
 function createCard(entry) {
   const el = document.createElement('article');
   el.className = `dv-card dv-card-${entry.kind}`;
@@ -244,11 +254,11 @@ function fillCard(el, entry, now) {
     const sub = el.querySelector('.dv-card-sub');
     setText(sub, mod.subtitle);
     sub.hidden = !mod.subtitle.trim();
-    const flags = [mod.notificationsBlocked ? 'Notifications blocked' : '', mod.musicPlaying ? 'Focus audio playing' : ''].filter(Boolean);
+    const flags = [mod.notificationsBlocked ? 'Notifications blocked' : '', musicLabel(mod)].filter(Boolean);
     const metaEl = el.querySelector('.dv-card-meta');
     setText(metaEl, flags.join(' · '));
     metaEl.hidden = flags.length === 0;
-    el.classList.toggle('is-music', Boolean(mod.musicPlaying));
+    el.classList.toggle('is-music', Boolean(mod.currentTrackId));
     return;
   }
   setText(el.querySelector('.dv-card-title'), entry.mod.title.trim() || MODULE_META.note.label);
@@ -322,6 +332,7 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
     setup: q('.dv-setup'), setupText: q('.dv-setup-text'),
   };
   let firstRender = true;
+  let lastState = null;
   let override = null;              // assistant-driven expression, or null for auto (happy)
   let reactTimer = null;
   let installHandler = null;
@@ -379,18 +390,25 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
     else if (!reactTimer) applyExpression();
     firstRender = false;
 
-    // Deep Focus audio: the visible player takes the mascot's place while music plays
+    // Deep Focus audio: the visible player takes the mascot's place while a track is requested/playing
     const focus = state.modules.focus;
-    const playing = Boolean(focus?.enabled && focus.musicPlaying && focus.currentTrackId);
-    els.player.hidden = !playing;
-    root.classList.toggle('is-playing', playing);
+    const requested = Boolean(focus?.enabled && focus.currentTrackId);
+    els.player.hidden = !requested;
+    root.classList.toggle('is-playing', requested);
+    lastState = state;
     emit('update', state);
   }
 
-  /** The visible YouTube player slot (null while the player is not on screen). */
-  function focusMount() { return els.player.hidden ? null : els.playerFrame; }
-  /** Autoplay was blocked: offer the one-tap start under the player. */
-  function setAudioBlocked(blocked) { els.playerStart.hidden = !blocked; }
+  /** The persistent YouTube player slot (always present; hidden until a track is requested, so the player can be created early). */
+  function focusMount() { return els.playerFrame; }
+  /** What the player really reports on this device: drives the Focus card label and the one-tap fallback. */
+  function setAudioState(audio) {
+    deviceAudio = audio;
+    els.playerStart.hidden = audio !== 'blocked';
+    const card = els.stack.querySelector('.dv-card[data-key="focus"]');
+    if (card && lastState) fillCard(card, { key: 'focus', kind: 'focus', mod: lastState.modules.focus }, new Date());
+  }
+  const setAudioBlocked = (blocked) => setAudioState(blocked ? 'blocked' : null);
 
   function setClock(date) {
     let digits = '';
@@ -498,5 +516,5 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
     els.typeInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') setTypeBox(false); });
   }
 
-  return { root, update, setClock, setConnection, setInstall, setOrientation, setAssistantState, setExpression, setHighlights, setTypeBox, setAssistantName, setSetup, focusMount, setAudioBlocked, on, get assistantState() { return assistantState; } };
+  return { root, update, setClock, setConnection, setInstall, setOrientation, setAssistantState, setExpression, setHighlights, setTypeBox, setAssistantName, setSetup, focusMount, setAudioState, setAudioBlocked, on, get assistantState() { return assistantState; } };
 }

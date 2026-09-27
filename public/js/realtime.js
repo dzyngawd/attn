@@ -34,6 +34,7 @@ import { normalizeState } from './state.js';
 import { splitWake, endIntent } from './wake.js';
 import { createReminderScheduler } from './reminders.js';
 import { createFocusPlayer } from './focus-player.js';
+import { localIntent } from './intents.js';
 
 const OPENAI_CALLS_URL = 'https://api.openai.com/v1/realtime/calls';
 const MIC_TIMEOUT_MS = 20000;
@@ -44,8 +45,8 @@ const ERROR_LINGER_MS = 4000;
 const INSTRUCTIONS_REFRESH_MS = 5 * 60 * 1000;
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 15000, 15000, 15000];
 const ACTIVE_WINDOW_MS = 9000;      // after a bare "Hey Andrew": how long we wait for the command
-const FOLLOW_UP_WINDOW_MS = 9000;   // after Andrew answers: corrections need no wake phrase
-const CLARIFY_WINDOW_MS = 12000;    // after Andrew asks a question
+const FOLLOW_UP_WINDOW_MS = 6000;   // after Andrew answers: corrections need no wake phrase, then quiet
+const CLARIFY_WINDOW_MS = 10000;    // after Andrew asks a question: he is expecting the answer
 const TRANSCRIPT_WAIT_MS = 8000;    // speech stopped but no transcript yet → give up on that turn
 
 const log = (...args) => console.log('[Realtime]', ...args);
@@ -75,19 +76,29 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   let askedQuestion = false;
   let reminderSpeaking = false;
   let closing = false; // a goodbye is being said; when it ends, straight back to passive (no follow-up window)
+  let pendingIntent = null; // 'focus_music_confirmation' while the device waits for yes/no to "Frequency music?"
+  let lastState = null;
+  let reportedPlaying = null; // last playback truth sent to the server
   const events = []; // debug ring buffer
 
   // ---- spoken reminders + focus audio are driven from the shared state
   const focusPlayer = createFocusPlayer({
     log: (...a) => console.log('[Focus]', ...a),
-    onBlocked: () => device.setAudioBlocked(true),
+    onBlocked: () => { device.setAudioState('blocked'); reportPlayback(false); },
     onState: (code) => { // YT.PlayerState: -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued
-      const names = { '-1': 'unstarted', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'cued' };
-      console.log('[Focus] player', names[code] ?? code);
-      if (code === 1) device.setAudioBlocked(false);
+      if (code === 1) { device.setAudioState('playing'); reportPlayback(true); }
+      else if (code === 2) { device.setAudioState('paused'); reportPlayback(false); }
+      else if (code === 3) device.setAudioState('loading');
+      else if (code === 0) { device.setAudioState(null); reportPlayback(false); }
     },
   });
-  let lastFocus = { musicPlaying: false, currentTrackId: null };
+  let lastFocus = { requested: false, currentTrackId: null };
+  /** Tell the server what the player is really doing, so musicPlaying means playing. */
+  function reportPlayback(playing) {
+    if (reportedPlaying === playing) return;
+    reportedPlaying = playing;
+    api.focusPlayback(playing).then((r) => { if (r?.state) device.update(normalizeState(r.state)); }).catch((err) => log('could not report playback:', err.message));
+  }
   const reminders = createReminderScheduler({
     log: (...a) => console.log('[Reminder]', ...a),
     canFire: () => connected && dc?.readyState === 'open' && (status === 'idle' || status === 'success' || status === 'clarifying'),
@@ -268,22 +279,112 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   /** Keep the visible YouTube player in step with the focus state. */
   function syncFocusAudio(state) {
     const f = state?.modules?.focus || {};
-    const shouldPlay = Boolean(f.enabled && f.musicPlaying && f.currentTrackId);
-    const changed = shouldPlay !== lastFocus.musicPlaying || f.currentTrackId !== lastFocus.currentTrackId;
-    lastFocus = { musicPlaying: shouldPlay, currentTrackId: f.currentTrackId || null };
-    if (shouldPlay) {
-      const mount = device.focusMount();
-      if (!mount) return;
+    const requested = Boolean(f.enabled && f.currentTrackId);
+    const changed = requested !== lastFocus.requested || f.currentTrackId !== lastFocus.currentTrackId;
+    lastFocus = { requested, currentTrackId: f.currentTrackId || null };
+    const mount = device.focusMount();
+    if (!mount) return;
+    if (requested) {
       if (changed || !focusPlayer.mounted || focusPlayer.videoId !== f.currentTrackId) {
-        focusPlayer.play(mount, f.currentTrackId).catch((err) => console.log('[Focus] could not start audio:', err.message));
+        console.log('[Focus] track requested:', f.currentTrackId);
+        reportedPlaying = null;
+        device.setAudioState('loading');
+        focusPlayer.play(mount, f.currentTrackId).catch((err) => { console.log('[Focus] could not start audio:', err.message); device.setAudioState('blocked'); });
       }
     } else if (changed) {
+      console.log('[Focus] no track requested — stopping the player');
       focusPlayer.stop();
-      device.setAudioBlocked(false);
+      reportedPlaying = null;
+      device.setAudioState(null);
+    } else if (f.enabled && !focusPlayer.mounted) {
+      focusPlayer.mount(mount).catch(() => {}); // Focus is on: have the player ready before anyone says yes
     }
   }
-  device.on('update', (state) => { reminders.sync(state); syncFocusAudio(state); });
-  device.on('startAudio', () => { focusPlayer.resume(); });
+  device.on('update', (state) => { lastState = state; reminders.sync(state); syncFocusAudio(state); });
+  device.on('startAudio', () => { focusPlayer.resume(); device.setAudioState(focusPlayer.playing ? 'playing' : 'loading'); });
+
+  // ================================================================ local intents (deterministic, no model)
+  /** Andrew says exactly this, out of band (not added to the conversation), tools off. */
+  function speak(text) {
+    replyText = '';
+    if (status !== 'speaking') set('processing', { transcript: userText });
+    armWatchdog(PROCESSING_WATCHDOG_MS);
+    const sent = send({ type: 'response.create', response: { conversation: 'none', tool_choice: 'none', output_modalities: ['audio'], max_output_tokens: 60, instructions: `Say exactly this and nothing else: "${text}"` } });
+    if (!sent) { replyText = text; clearWatchdog(); afterResponse(); } // no session (debug): behave as if it was said
+  }
+  /** Keep the model's context truthful about what the device did on its own. */
+  function note(text) {
+    send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: `[attn device] ${text}` }] } });
+  }
+  async function localTool(nameOf, args, modules = []) {
+    const res = await api.realtimeTool({ name: nameOf, call_id: `local-${Date.now()}`, arguments: JSON.stringify(args), ...timeContext() });
+    const output = res.output || { success: false, error: 'No result.' };
+    log('local action result:', output.success ? 'success' : 'failed', output.message || output.error || '');
+    if (!output.success) throw new Error(output.error || 'action failed');
+    if (res.changed && res.state) {
+      toolChanged = true;
+      try { device.update(normalizeState(res.state)); } catch { /* keep going */ }
+      pendingHighlights = { itemIds: [...pendingHighlights.itemIds, ...(res.highlightItemIds || [])], modules: [...pendingHighlights.modules, ...modules] };
+    }
+    return output;
+  }
+  /** The hackathon-critical flows run here, deterministically; the model only supplies the voice. */
+  async function runLocal(intent, { itemId, transcript }) {
+    clearTimeout(activeTimer);
+    clearTimeout(transcriptTimer);
+    askedQuestion = false;
+    setMode('active', 'local: ' + intent.type);
+    userText = transcript;
+    set('processing', { transcript });
+    armWatchdog(PROCESSING_WATCHDOG_MS);
+    console.log('[Local]', intent.type, '←', JSON.stringify(transcript));
+    if (itemId) send({ type: 'conversation.item.delete', item_id: itemId }); // the device handled it; a note below keeps the context truthful
+    try {
+      switch (intent.type) {
+        case 'focus_start':
+          await localTool('set_focus', { enabled: true, label: 'Deep Focus', notificationsBlocked: true }, ['focus']);
+          pendingIntent = 'focus_music_confirmation';
+          note('Deep Focus is on; the card shows "Notifications blocked" (display only). The device asked "Frequency music?" itself and handles the yes/no. Do not ask again.');
+          speak('Frequency music?');
+          break;
+        case 'focus_yes':
+          pendingIntent = null;
+          await localTool('start_focus_music', {}, ['focus']);
+          note('The user said yes to focus music: a PureGritStudio track is starting on the device.');
+          speak('Starting.');
+          break;
+        case 'focus_no':
+          pendingIntent = null;
+          note('The user said no to focus music. Focus stays on, no music.');
+          speak('Okay.');
+          break;
+        case 'music_stop':
+          await localTool('stop_focus_music', {}, ['focus']);
+          note('Focus music stopped by the device; Focus stays on.');
+          speak('Stopped.');
+          break;
+        case 'focus_end':
+          pendingIntent = null;
+          await localTool('end_focus_mode', {}, ['focus']);
+          note('Focus mode ended by the device.');
+          speak('Done.');
+          break;
+        default:
+          respondTo(transcript);
+      }
+    } catch (err) {
+      log('local action failed:', err.message);
+      showError("I couldn't do that. Try again.");
+    }
+  }
+  /** A command meant for Andrew: the device's own intents first, otherwise the model. */
+  function handleCommand(command, transcript, itemId) {
+    const f = lastState?.modules?.focus || {};
+    const intent = localIntent(command, { pendingIntent, musicRequested: Boolean(f.enabled && f.currentTrackId), focusOn: Boolean(f.enabled) });
+    if (intent) { runLocal(intent, { itemId, transcript }); return; }
+    if (pendingIntent) { console.log('[Local] pending', pendingIntent, 'dropped — the user asked for something else'); pendingIntent = null; }
+    respondTo(transcript);
+  }
 
   // ================================================================ wake gate (passive / active)
   function setMode(mode, reason) {
@@ -300,6 +401,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     activeTimer = setTimeout(() => {
       if (status === 'processing' || status === 'speaking') { openActiveWindow(ms, 'still busy'); return; }
       askedQuestion = false;
+      pendingIntent = null;
       setMode('passive', 'window expired');
       if (status !== 'idle') set('idle');
     }, ms);
@@ -333,19 +435,24 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
       console.log('[Wake] detected:', JSON.stringify(heard || text));
       if (!command) { openActiveWindow(ACTIVE_WINDOW_MS, 'wake phrase only'); set('listening'); return; }
       console.log('[Wake] extracted command:', JSON.stringify(command));
-      respondTo(text);
+      handleCommand(command, text, itemId);
       return;
     }
-    // active: 1) an end/dismiss phrase closes Andrew locally (no model, no tools)
+    // active: 1) the answer to the device's own "Frequency music?" question
+    if (pendingIntent) {
+      const answer = localIntent(woke ? command : text, { pendingIntent });
+      if (answer) { runLocal(answer, { itemId, transcript: text }); return; }
+    }
+    // 2) an end/dismiss phrase closes Andrew locally (no model, no tools)
     const end = endIntent(text, name, { questionPending: askedQuestion });
     if (end) {
       console.log(`[Andrew] ${end.kind === 'dismiss' ? 'dismissed' : 'conversation closed'} by the user:`, JSON.stringify(text));
       endAndrewConversation({ kind: end.kind, itemId });
       return;
     }
-    // 2) follow-up, correction or clarification answer; a wake phrase is optional
+    // 3) follow-up, correction or clarification answer; a wake phrase is optional
     if (woke && !command) { openActiveWindow(askedQuestion ? CLARIFY_WINDOW_MS : ACTIVE_WINDOW_MS, 'wake phrase again'); set('listening'); return; }
-    respondTo(text);
+    handleCommand(woke ? command : text, text, itemId);
   }
 
   /**
@@ -358,6 +465,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     clearTimeout(transcriptTimer);
     clearWatchdog();
     askedQuestion = false;
+    pendingIntent = null;
     toolChanged = false;
     pendingHighlights = { itemIds: [], modules: [] };
     userText = '';
@@ -386,7 +494,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
       case 'session.updated':
         break;
       case 'input_audio_buffer.speech_started':
-        if (assistantMode !== 'active' && status === 'idle') break; // ambient speech: the screen stays as it is
+        if (assistantMode !== 'active') break; // ambient speech: the screen stays as it is
         log('speech started');
         clearTimeout(idleTimer);
         clearTimeout(activeTimer); // the window pauses while the user is talking
@@ -394,7 +502,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
         set('listening', { text: askedQuestion ? replyText : '' });
         break;
       case 'input_audio_buffer.speech_stopped':
-        if (assistantMode !== 'active' && status === 'idle') break;
+        if (assistantMode !== 'active') break;
         log('speech stopped');
         set('processing', { transcript: userText });
         clearTimeout(transcriptTimer);
@@ -486,6 +594,8 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
             try { device.update(normalizeState(res.state)); } catch { /* keep going */ }
             pendingHighlights = { itemIds: [...pendingHighlights.itemIds, ...(res.highlightItemIds || [])], modules: [...pendingHighlights.modules, ...(call.name === 'set_focus' || call.name === 'set_note' ? [call.name === 'set_focus' ? 'focus' : 'note'] : [])] };
           }
+          if (output.pendingIntent) { pendingIntent = output.pendingIntent; console.log('[Local] pending', pendingIntent, '(the model asks, the device handles the answer)'); }
+          else if (['start_focus_music', 'stop_focus_music', 'end_focus_mode'].includes(call.name)) pendingIntent = null;
         } catch (err) {
           log('action result: error', err.message);
           output = { success: false, error: 'attn could not reach its own server to run that action.' };
@@ -544,6 +654,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     askedQuestion = false;
     reminderSpeaking = false;
     closing = false;
+    pendingIntent = null;
     setMode('passive', 'error');
     set('error', { text: message });
     idleTimer = setTimeout(() => { if (status === 'error') set('idle'); }, ERROR_LINGER_MS);
@@ -554,6 +665,9 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     enabled = true;
     remember(true);
     reconnectAttempt = 0;
+    // the user's tap is the best moment to create the YouTube player (media restrictions), so do it now
+    const mount = device.focusMount();
+    if (mount) focusPlayer.mount(mount).catch(() => {});
     await connect();
   }
 
@@ -608,6 +722,9 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     get mode() { return assistantMode; },
     get reminders() { return reminders.pending; },
     endConversation: (kind = 'dismiss') => endAndrewConversation({ kind }),
+    get pendingIntent() { return pendingIntent; },
+    runLocal: (type) => runLocal({ type }, { itemId: null, transcript: '(debug)' }),
+    get player() { return { videoId: focusPlayer.videoId, playing: focusPlayer.playing, mounted: focusPlayer.mounted }; },
     speakReminder,
     get connected() { return connected; },
     get events() { return events; },

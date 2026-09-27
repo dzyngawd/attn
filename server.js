@@ -25,7 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeState, DEFAULT_STATE } from './public/js/state.js';
-import { markReminderTriggered, completeItem } from './public/js/actions.js';
+import { markReminderTriggered, completeItem, setFocusPlayback } from './public/js/actions.js';
 import { handleCommand, ASSISTANT_NAME } from './lib/assistant.js';
 import { isConfigured, isMock, getModel, PROVIDER } from './lib/gemini.js';
 import * as realtime from './lib/realtime.js';
@@ -185,6 +185,15 @@ app.post('/api/items/complete', (req, res) => {
 });
 
 // The device's reminder scheduler marks a spoken reminder as done the moment it fires (never twice).
+app.post('/api/focus/playback', (req, res) => {
+  const playing = req.body?.playing === true;
+  const working = structuredClone(state);
+  const r = setFocusPlayback(working, { playing });
+  const saved = r.changed ? applyState(working) : state;
+  if (r.changed) console.log(`[Focus] device reports audio ${playing ? 'playing' : 'not playing'}`);
+  noStore(res).json({ ok: true, state: saved });
+});
+
 app.post('/api/reminders/triggered', (req, res) => {
   const itemId = typeof req.body?.itemId === 'string' ? req.body.itemId : '';
   const working = structuredClone(state);
