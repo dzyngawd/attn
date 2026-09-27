@@ -8,7 +8,7 @@
  *     opens the device (which then shows "Reconnecting…").
  * Bump VERSION when you want every installed device to drop its old shell.
  */
-const VERSION = 'attn-shell-v2';
+const VERSION = 'attn-shell-v3';
 const SHELL = [
   '/', '/control', '/device',
   '/css/tokens.css', '/css/shared.css', '/css/device.css', '/css/control.css',

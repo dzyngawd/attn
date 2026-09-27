@@ -10,12 +10,16 @@
  *   dev.setConnection('online', 'Connected');  // top-right pill
  *   dev.setInstall(true, onClick);             // "Install" pill (device page only)
  *
- * Voice layer (device page only; hidden in the preview) — driven by assistant.js:
- *   dev.setVoice({ status: 'listening' | 'thinking' | 'idle', label, transcript })  // Figma voice overlay
- *   dev.setReply({ text, action, tone } | null)                                       // Andrew's caption card
- *   dev.setExpression('auto' | 'neutral' | 'happy' | 'puzzled' | 'surprised' | 'listening' | 'speaking')
- *   dev.setHighlights({ itemIds, modules })                                            // pulse the cards it changed
- *   dev.setTypeBox(open) · dev.setAssistantName(name) · dev.on('talk' | 'cancel' | 'submitText' | 'replyAction', fn)
+ * Voice layer (device page only; hidden in the preview) — driven by assistant.js.
+ * The device is a state machine: assistantState ∈ idle | listening | processing |
+ * speaking | clarifying | success | error. Idle and success show the dashboard;
+ * every other state brings the attn character forward as a full-screen face
+ * (Figma mascot card: rounded-square eyes + small mouth; listening = slow
+ * waveform mouth, speaking = fast waveform, puzzled = "?" bubble + glance).
+ *   dev.setAssistantState(state, { text, transcript, action })
+ *   dev.setExpression('auto' | 'neutral' | 'happy' | 'puzzled' | 'surprised')      // the small dashboard face
+ *   dev.setHighlights({ itemIds, modules })                                          // pulse the cards it changed
+ *   dev.setTypeBox(open) · dev.setAssistantName(name) · dev.on('talk' | 'faceTap' | 'submitText', fn)
  *
  * Rendering rules:
  *   - text changes update in place (no flash, no rebuild)
@@ -36,7 +40,6 @@ const HIGHLIGHT_MS = 2600;
 const EYE = 'M 10.485 0 L 80.384 5.483 L 90.869 16.45 L 90.869 87.734 L 80.384 100.071 L 15.145 94.588 L 0 82.25 L 0 12.338 L 10.485 0 Z';
 const HIGHLIGHT = '59.813,17.253 81.668,18.403 81.668,39.108 59.813,37.95';
 const BUBBLE = 'M 14.947 0 L 141.5 0 L 141.5 95.662 L 62.778 101.641 L 46.835 119.577 L 49.824 100.644 L 0 95.662 L 0 12.954 L 4.982 12.954 L 4.982 4.982 L 14.947 4.982 L 14.947 0 Z';
-const BLOB = 'M 203.92 91.629 C 203.92 173.811 143.615 137.915 47.505 164.365 C 34.313 174.441 6.422 200.638 0.392 224.821 C -5.639 249.003 59.44 278.35 92.733 290 C 137.962 284.017 247.641 255.049 324.529 187.036 C 401.418 119.023 323.901 34.007 275.532 0 C 251.661 3.149 203.92 25.883 203.92 91.629 Z';
 // Sound-wave mouth from the mascot guideline (bar heights ×3 for the 360-unit face)
 const WAVE = [27, 51, 72, 84, 57, 30].map((h, i) => `<rect class="dv-wave-bar" x="${(123.7 + i * 20).toFixed(1)}" y="${(147 - h / 2).toFixed(1)}" width="12" height="${h}" rx="6" style="--d:${[-0.1, -0.3, -0.5, -0.2, -0.4, -0.6][i]}s"/>`).join('');
 
@@ -56,7 +59,6 @@ const FACE_SVG = `
   <g transform="translate(4 -104) scale(-1 1)"><g class="dv-bubble"><path d="${BUBBLE}" fill="rgb(228,227,224)"/><text class="dv-bubble-text" x="70" y="78" text-anchor="middle" transform="translate(141.5 0) scale(-1 1)">?</text></g></g>
 </svg>`;
 
-const ORB_SVG = `<svg class="dv-orb-svg" viewBox="0 0 203 203" aria-hidden="true"><rect width="203" height="203" fill="#fff"/><g transform="translate(6 -50.5)"><path d="${BLOB}" fill="rgb(0,159,254)"/></g><g transform="matrix(-0.991 0.135 -0.135 -0.991 202.966 195.831)"><path d="${BLOB}" fill="rgb(255,214,0)"/></g></svg>`;
 const MIC_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
 const KEYBOARD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg>';
 const SEND_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
@@ -83,11 +85,6 @@ const SKELETON = `
     <div class="dv-empty-title">You're all caught up.</div>
     <div class="dv-empty-sub">Turn something on in the Control Centre and it shows up here.</div>
   </div>
-  <div class="dv-reply" hidden>
-    <div class="dv-reply-orb">${ORB_SVG}</div>
-    <div class="dv-reply-text"><div class="dv-reply-who">attn</div><p class="dv-reply-body"></p></div>
-    <button class="dv-reply-action" type="button" hidden></button>
-  </div>
   <form class="dv-typebox" hidden>
     <input class="dv-typebox-input" type="text" autocomplete="off" enterkeyhint="send" maxlength="240" placeholder="Ask attn…" aria-label="Type a command">
     <button class="dv-typebox-send" type="submit" aria-label="Send">${SEND_SVG}</button>
@@ -97,12 +94,27 @@ const SKELETON = `
     <button class="dv-type-toggle" type="button" aria-label="Type instead">${KEYBOARD_SVG}</button>
     <button class="dv-install" type="button" hidden>Install</button>
   </div>
-  <div class="dv-voice" data-status="idle" hidden>
-    <div class="dv-orb-wrap"><span class="dv-orb-ring"></span><span class="dv-orb-ring"></span><div class="dv-orb">${ORB_SVG}</div></div>
-    <div class="dv-voice-label">Listening</div>
-    <div class="dv-voice-transcript"></div>
-    <div class="dv-voice-hint">Tap anywhere to cancel</div>
+</div>
+<!-- the character comes forward: full-screen face for listening / processing / speaking / clarifying / error -->
+<div class="dv-facemode" hidden>
+  <div class="dv-facemode-glow" aria-hidden="true"></div>
+  <div class="dv-bigface" data-expression="neutral" aria-hidden="true">
+    <div class="dv-bigeyes"><span class="dv-bigeye dv-bigeye-l"></span><span class="dv-bigeye dv-bigeye-r"></span></div>
+    <div class="dv-bigmouth">
+      <span class="dv-bigmouth-dash"></span>
+      <span class="dv-bigmouth-wave"><b></b><b></b><b></b><b></b><b></b><b></b></span>
+      <span class="dv-bigmouth-o"></span>
+      <span class="dv-bigmouth-smile"></span>
+    </div>
+    <div class="dv-bigbubble">?</div>
   </div>
+  <div class="dv-facemode-text">
+    <div class="dv-facemode-who">attn</div>
+    <div class="dv-facemode-line"></div>
+    <div class="dv-facemode-sub"></div>
+    <button class="dv-facemode-action" type="button" hidden></button>
+  </div>
+  <div class="dv-facemode-hint"></div>
 </div>`;
 
 const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
@@ -232,8 +244,7 @@ export function createDeviceRenderer(root, { preview = false } = {}) {
     conn: q('.dv-conn'), connText: q('.dv-conn-text'),
     digits: q('.dv-time-digits'), period: q('.dv-time-period'), date: q('.dv-date'),
     install: q('.dv-install'),
-    voice: q('.dv-voice'), voiceLabel: q('.dv-voice-label'), voiceTranscript: q('.dv-voice-transcript'),
-    reply: q('.dv-reply'), replyWho: q('.dv-reply-who'), replyBody: q('.dv-reply-body'), replyAction: q('.dv-reply-action'),
+    facemode: q('.dv-facemode'), bigface: q('.dv-bigface'), fmWho: q('.dv-facemode-who'), fmLine: q('.dv-facemode-line'), fmSub: q('.dv-facemode-sub'), fmAction: q('.dv-facemode-action'), fmHint: q('.dv-facemode-hint'),
     typebox: q('.dv-typebox'), typeInput: q('.dv-typebox-input'), typeToggle: q('.dv-type-toggle'),
     talk: q('.dv-talk'), talkLabel: q('.dv-talk-label'),
   };
@@ -243,7 +254,9 @@ export function createDeviceRenderer(root, { preview = false } = {}) {
   let reactTimer = null;
   let installHandler = null;
   let highlightTimer = null;
-  const handlers = { talk: [], cancel: [], submitText: [], replyAction: [] };
+  const handlers = { talk: [], faceTap: [], submitText: [] };
+  let assistantState = 'idle';
+  let hideTimer = null;
   const emit = (event, ...args) => handlers[event].forEach((fn) => fn(...args));
 
   const applyExpression = () => { els.face.dataset.expression = override || baseExpression; };
@@ -301,25 +314,35 @@ export function createDeviceRenderer(root, { preview = false } = {}) {
     els.install.hidden = !visible;
   }
 
-  // ---------------------------------------------------------------- voice layer
-  function setVoice({ status = 'idle', label = '', transcript = '' } = {}) {
-    els.voice.dataset.status = status;
-    els.voice.hidden = status === 'idle';
-    setText(els.voiceLabel, label);
-    setText(els.voiceTranscript, transcript ? `“${transcript}”` : '');
-    root.classList.toggle('is-voice', status !== 'idle');
-  }
+  // ---------------------------------------------------------------- voice layer (state machine)
+  const FACE_FOR = { listening: 'listening', processing: 'thinking', speaking: 'speaking', clarifying: 'puzzled', error: 'surprised' };
+  const HINT_FOR = { listening: 'Tap anywhere to cancel', processing: 'Tap to cancel', speaking: 'Tap to skip', clarifying: '', error: '' };
+  const FACE_STATES = ['listening', 'processing', 'speaking', 'clarifying', 'error'];
 
-  function setReply(reply) {
-    if (!reply) { els.reply.hidden = true; els.reply.classList.remove('is-visible'); return; }
-    setText(els.replyBody, reply.text || '');
-    els.reply.dataset.tone = reply.tone || 'default';
-    els.replyAction.hidden = !reply.action;
-    setText(els.replyAction, reply.action || '');
-    els.reply.hidden = false;
-    requestAnimationFrame(() => els.reply.classList.add('is-visible'));
+  /** Render one assistant lifecycle state. Idle and success show the dashboard; the rest bring the face forward. */
+  function setAssistantState(state, { text = '', transcript = '', action = null } = {}) {
+    assistantState = state;
+    root.dataset.assistant = state;
+    const forward = FACE_STATES.includes(state);
+    clearTimeout(hideTimer);
+    if (forward) {
+      els.facemode.hidden = false;
+      els.bigface.dataset.expression = FACE_FOR[state];
+      setText(els.fmLine, text);
+      els.fmLine.classList.toggle('is-empty', !text);
+      setText(els.fmSub, transcript ? '\u201c' + transcript + '\u201d' : '');
+      els.fmAction.hidden = !action;
+      setText(els.fmAction, action || '');
+      setText(els.fmHint, HINT_FOR[state]);
+      els.fmWho.hidden = !text;
+      requestAnimationFrame(() => els.facemode.classList.add('is-visible'));
+    } else {
+      els.facemode.classList.remove('is-visible');
+      hideTimer = setTimeout(() => { if (!FACE_STATES.includes(assistantState)) els.facemode.hidden = true; }, 420);
+      if (state === 'success') { setExpression('happy'); setTimeout(() => { if (assistantState === 'success' || assistantState === 'idle') setExpression('auto'); }, REACT_MS); }
+    }
+    root.classList.toggle('is-voice', forward);
   }
-
   function setExpression(expr) {
     clearTimeout(reactTimer); reactTimer = null;
     override = expr === 'auto' ? null : expr;
@@ -346,7 +369,7 @@ export function createDeviceRenderer(root, { preview = false } = {}) {
   }
 
   function setAssistantName(name) {
-    setText(els.replyWho, name);
+    setText(els.fmWho, name);
     setText(els.talkLabel, `Talk to ${name}`);
     els.typeInput.placeholder = `Ask ${name}…`;
   }
@@ -356,12 +379,12 @@ export function createDeviceRenderer(root, { preview = false } = {}) {
   if (!preview) {
     els.talk.addEventListener('click', () => emit('talk'));
     els.face.addEventListener('click', () => emit('talk'));
-    els.voice.addEventListener('click', () => emit('cancel'));
-    els.replyAction.addEventListener('click', () => emit('replyAction'));
+    els.facemode.addEventListener('click', (e) => { if (e.target !== els.fmAction) emit('faceTap', assistantState, false); });
+    els.fmAction.addEventListener('click', () => emit('faceTap', assistantState, true));
     els.typeToggle.addEventListener('click', () => setTypeBox(els.typebox.hidden));
     els.typebox.addEventListener('submit', (e) => { e.preventDefault(); const text = els.typeInput.value.trim(); if (!text) return; els.typeInput.value = ''; emit('submitText', text); });
     els.typeInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') setTypeBox(false); });
   }
 
-  return { root, update, setClock, setConnection, setInstall, setVoice, setReply, setExpression, setHighlights, setTypeBox, setAssistantName, on };
+  return { root, update, setClock, setConnection, setInstall, setAssistantState, setExpression, setHighlights, setTypeBox, setAssistantName, on, get assistantState() { return assistantState; } };
 }

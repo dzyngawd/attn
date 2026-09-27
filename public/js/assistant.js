@@ -1,10 +1,15 @@
 /**
  * attn — voice + text assistant on the device page.
  *
- *   tap  →  LISTENING (Web Speech API)  →  transcript  →  THINKING (POST /api/assistant/command)
- *        →  device state applied at once  →  SPEAKING (SpeechSynthesis) + reply card + card pulses
- *        →  back to the normal screen. Clarifications ask one question, then listen once more.
+ * The device is a state machine tied to the REAL assistant lifecycle:
  *
+ *   idle ──tap──▶ listening ──transcript──▶ processing ──reply──▶ speaking ──▶ success ──▶ idle
+ *                                                │                    │
+ *                                                └─ clarify ─────────▶ clarifying ──▶ listening (voice) / keyboard (text)
+ *                                                └─ failure ─────────▶ error ──▶ idle (or clarifying if a question is pending)
+ *
+ * Every state is rendered by render-device.js (setAssistantState). Idle and
+ * success show the dashboard; the others bring the attn face forward.
  * Typed commands (keyboard button) go through the exact same send() path.
  * Every state has a way back to idle: nothing can leave the device stuck.
  *
@@ -17,19 +22,20 @@ import { api } from './api.js';
 import { normalizeState } from './state.js';
 
 const LISTEN_TIMEOUT_MS = 12000;   // stop listening if nothing final arrives
-const REPLY_LINGER_MS = 1800;      // keep the reply card after speech ends
+const SUCCESS_LINGER_MS = 2400;    // how long the highlight pulse plays before idle
 const ERROR_LINGER_MS = 5000;
 
 export function createAssistant({ device, name = 'attn', onState = () => {} }) {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
   const synth = 'speechSynthesis' in window ? window.speechSynthesis : null;
-  let status = 'idle';       // idle | listening | thinking | speaking | clarify | error
+  let status = 'idle';       // idle | listening | processing | speaking | clarifying | success | error
   let recognition = null;
   let listenTimer = null;
   let idleTimer = null;
   let request = null;        // AbortController for the in-flight command
   let lastQuestion = null;   // clarification we are waiting to answer
   let lastInput = 'voice';   // how the current command arrived: 'voice' | 'text'
+  let pendingResult = null;  // { state, highlights } to apply when the face steps back
   let voice = null;
   const conversationId = conversationKey();
 
@@ -41,7 +47,7 @@ export function createAssistant({ device, name = 'attn', onState = () => {} }) {
     } catch { return `c${Date.now().toString(36)}`; }
   }
 
-  const set = (next) => { status = next; onState(next); };
+  const set = (next, detail) => { status = next; device.setAssistantState(next, detail); onState(next); };
   const clearTimers = () => { clearTimeout(listenTimer); clearTimeout(idleTimer); };
 
   // ------------------------------------------------------------- speech out
@@ -80,35 +86,39 @@ export function createAssistant({ device, name = 'attn', onState = () => {} }) {
       try { synth.speak(u); } catch { finish(); }
     });
   }
+  const stopSpeaking = () => { try { synth?.cancel(); } catch { /* ignore */ } };
 
   // ------------------------------------------------------------- states
   function toIdle() {
     clearTimers();
     lastQuestion = null;
     set('idle');
-    device.setVoice({ status: 'idle' });
-    device.setReply(null);
-    device.setExpression('auto');
+  }
+
+  /** The face steps back, the dashboard shows what changed, then idle. */
+  function toSuccess() {
+    clearTimers();
+    lastQuestion = null;
+    const result = pendingResult;
+    pendingResult = null;
+    set('success');
+    if (result?.state) { try { device.update(result.state); } catch { /* keep going */ } }
+    setTimeout(() => device.setHighlights(result?.highlights || { itemIds: [], modules: [] }), 380); // once the face has faded
+    idleTimer = setTimeout(toIdle, SUCCESS_LINGER_MS);
   }
 
   function showError(message, { openTypeBox = false } = {}) {
     clearTimers();
     recognition = null;
-    set('error');
-    device.setVoice({ status: 'idle' });
-    device.setExpression('surprised');
-    device.setReply({ text: message, action: lastQuestion ? 'Tap to answer' : 'Tap to retry', tone: 'error' });
+    set('error', { text: message, action: lastQuestion ? 'Tap to answer' : 'Tap to try again' });
     if (openTypeBox) device.setTypeBox(true);
     idleTimer = setTimeout(() => (lastQuestion ? waitForAnswer() : toIdle()), ERROR_LINGER_MS);
   }
 
-  /** Clarification asked, nobody answered yet: keep the question on screen. */
+  /** Clarification asked, nobody answered yet: keep the question on the face. */
   function waitForAnswer() {
     clearTimers();
-    set('clarify');
-    device.setVoice({ status: 'idle' });
-    device.setExpression('puzzled');
-    device.setReply({ text: lastQuestion, action: 'Tap to answer' });
+    set('clarifying', { text: lastQuestion, action: lastInput === 'text' ? 'Type your answer' : 'Tap to answer' });
     if (lastInput === 'text') device.setTypeBox(true); // answer the same way the question was asked
   }
 
@@ -123,12 +133,9 @@ export function createAssistant({ device, name = 'attn', onState = () => {} }) {
     recognition.interimResults = true;
     recognition.continuous = false;
     recognition.maxAlternatives = 1;
-    set('listening');
     lastInput = 'voice';
     device.setTypeBox(false);
-    device.setReply(null);
-    device.setExpression('listening');
-    device.setVoice({ status: 'listening', label: 'Listening', transcript: '' });
+    set('listening', { text: lastQuestion || '' });
 
     const settle = (fn) => { if (settled) return; settled = true; clearTimeout(listenTimer); fn(); };
     recognition.onresult = (e) => {
@@ -137,7 +144,7 @@ export function createAssistant({ device, name = 'attn', onState = () => {} }) {
         const r = e.results[i];
         if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript;
       }
-      device.setVoice({ status: 'listening', label: 'Listening', transcript: (finalText || interim).trim() });
+      device.setAssistantState('listening', { text: lastQuestion || '', transcript: (finalText || interim).trim() });
       if (finalText.trim()) settle(() => { try { recognition.stop(); } catch { /* ignore */ } send(finalText.trim()); });
     };
     recognition.onerror = (e) => settle(() => {
@@ -159,16 +166,14 @@ export function createAssistant({ device, name = 'attn', onState = () => {} }) {
   function cancel() {
     if (recognition) { try { recognition.abort(); } catch { /* ignore */ } recognition = null; }
     if (request) { request.abort(); request = null; }
-    try { synth?.cancel(); } catch { /* ignore */ }
+    stopSpeaking();
     if (lastQuestion) waitForAnswer(); else toIdle();
   }
 
   async function send(text) {
     clearTimers();
     recognition = null;
-    set('thinking');
-    device.setExpression('neutral');
-    device.setVoice({ status: 'thinking', label: 'Thinking', transcript: text });
+    set('processing', { transcript: text });
     const controller = new AbortController();
     request = controller;
     let res;
@@ -187,49 +192,49 @@ export function createAssistant({ device, name = 'attn', onState = () => {} }) {
     } finally {
       if (request === controller) request = null;
     }
-    if (status !== 'thinking') return;
+    if (status !== 'processing') return; // cancelled meanwhile
     if (!res || res.ok === false) { showError(res?.spokenResponse || "I didn't get that. Try again."); return; }
 
-    if (res.state) { try { device.update(normalizeState(res.state)); } catch { /* keep going */ } }
     const isClarify = res.type === 'clarify';
-    const anyFailed = (res.results || []).some((r) => !r.ok);
     lastQuestion = isClarify ? (res.clarificationQuestion || res.spokenResponse) : null;
+    pendingResult = isClarify ? null : {
+      state: res.state ? normalizeState(res.state) : null,
+      highlights: { itemIds: res.highlightItemIds || [], modules: (res.results || []).filter((r) => r.ok && !r.itemId && r.module).map((r) => r.module) },
+    };
 
-    device.setVoice({ status: 'idle' });
-    device.setHighlights({
-      itemIds: res.highlightItemIds || [],
-      modules: (res.results || []).filter((r) => r.ok && !r.itemId && r.module).map((r) => r.module),
-    });
-    set('speaking');
-    device.setExpression(isClarify ? 'puzzled' : 'speaking');
-    device.setReply({ text: res.spokenResponse, action: isClarify ? 'Tap to answer' : null });
+    set('speaking', { text: res.spokenResponse });
     await speak(res.spokenResponse);
     if (status !== 'speaking') return;
 
     if (isClarify) { if (lastInput === 'voice') listen(); else waitForAnswer(); return; } // one more turn for the answer
-    device.setExpression(anyFailed ? 'neutral' : 'happy');
-    idleTimer = setTimeout(toIdle, REPLY_LINGER_MS);
+    toSuccess();
   }
 
   // ------------------------------------------------------------- public API
   function toggle() {
     if (status === 'listening') { cancel(); return; }
-    if (status === 'thinking') return;
-    if (status === 'speaking') { try { synth?.cancel(); } catch { /* ignore */ } }
+    if (status === 'processing') return;
+    if (status === 'speaking') { stopSpeaking(); return; } // speak() resolves → success/clarify continue
     listen();
   }
   function submitText(text) {
     const t = (text || '').trim();
-    if (!t || status === 'thinking') return;
+    if (!t || status === 'processing') return;
     if (recognition) { try { recognition.abort(); } catch { /* ignore */ } recognition = null; }
     lastInput = 'text';
     send(t);
   }
+  /** A tap on the face view: what it means depends on the state. */
+  function faceTap(state, viaButton) {
+    if (state === 'listening' || state === 'processing') cancel();
+    else if (state === 'speaking') stopSpeaking();
+    else if (state === 'clarifying') { if (viaButton && lastInput === 'text') device.setTypeBox(true); else listen(); }
+    else if (state === 'error') { if (lastQuestion && lastInput === 'text') waitForAnswer(); else listen(); }
+  }
 
   device.on('talk', toggle);
-  device.on('cancel', () => { if (status === 'listening' || status === 'thinking') cancel(); });
+  device.on('faceTap', faceTap);
   device.on('submitText', submitText);
-  device.on('replyAction', () => listen());
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && status === 'listening') cancel(); });
   device.setAssistantName(name);
 

@@ -58,6 +58,8 @@ The keyboard button opens a typed command box that goes through the exact same p
 | --- | --- | --- |
 | `GEMINI_API_KEY` | yes | Server-side only. Never shipped to the browser, never committed. |
 | `GEMINI_MODEL` | no | Default `gemini-3.8-flash`. `gemini-3.5-flash-lite` is the cheaper/faster option; `gemini-flash-latest` always points at the newest Flash. |
+| `GEMINI_FALLBACK_MODEL` | no | Default `gemini-3.5-flash-lite`: tried once when the main model answers 429 (quota). `0` disables. |
+| `GEMINI_FOLLOW_UP` | no | `0` skips the second wording request per command (halves quota use); attn then speaks a plain confirmation. |
 | `GEMINI_THINKING_LEVEL` | no | `LOW` (default), `MEDIUM`, `HIGH` or `off`. Lower is faster. |
 | `ASSISTANT_NAME` | no | Default `Andrew`. Used in speech, on screen and as an optional wake word. |
 | `ATTN_ASSISTANT_MOCK` | no | `1` answers with a built-in stub instead of Gemini (dev/testing only). |
