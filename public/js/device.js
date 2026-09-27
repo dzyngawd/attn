@@ -27,7 +27,7 @@ const device = createDeviceRenderer(document.getElementById('device'), { debug: 
 let lastRevision = -1;
 let failures = 0;
 let status = '';
-const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+const isStandalone = ['fullscreen', 'standalone', 'minimal-ui'].some((m) => window.matchMedia(`(display-mode: ${m})`).matches) || window.navigator.standalone === true;
 
 function adopt(state) {
   const s = normalizeState(state);
@@ -91,9 +91,16 @@ async function lockLandscape() {
     if (screen.orientation?.lock) { await screen.orientation.lock('landscape'); console.log('[Viewport] orientation locked to landscape'); }
   } catch (err) { console.log('[Viewport] orientation lock unavailable:', err?.name || err?.message || err); }
 }
-if (isStandalone) lockLandscape();
-// browsers only allow the lock from a user gesture (and often only when installed); try again on the first tap
-window.addEventListener('pointerdown', () => { if (!isStandalone) return; lockLandscape(); }, { once: true });
+/** As close to true fullscreen as the browser allows: the installed PWA already launches fullscreen (manifest), a browser tab needs the API. */
+async function goFullscreen() {
+  if (!document.fullscreenEnabled || document.fullscreenElement || window.matchMedia('(display-mode: fullscreen)').matches) return false;
+  try { await document.documentElement.requestFullscreen({ navigationUI: 'hide' }); console.log('[Viewport] fullscreen'); return true; }
+  catch (err) { console.log('[Viewport] fullscreen unavailable:', err?.name || err?.message || err); return false; }
+}
+const touchDevice = window.matchMedia('(pointer: coarse)').matches;
+// at launch (works when installed / already allowed), then again on the first real tap — the Enable Andrew tap — which browsers require for both
+if (isStandalone) { goFullscreen().finally(lockLandscape); }
+window.addEventListener('pointerdown', () => { if (!isStandalone && !touchDevice) return; goFullscreen().finally(lockLandscape); }, { once: true });
 
 // ---- viewport diagnostics for the physical Samsung (console only, never in the UI)
 function logViewport(reason) {

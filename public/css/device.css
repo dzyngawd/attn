@@ -17,7 +17,8 @@
   overscroll-behavior: none;
   transition: --theme-deep var(--theme-transition), --theme-primary var(--theme-transition), --theme-secondary var(--theme-transition),
               --theme-soft var(--theme-transition), --theme-highlight var(--theme-transition), --theme-glow var(--theme-transition),
-              --theme-card-accent var(--theme-transition), --theme-text var(--theme-transition), --theme-text-soft var(--theme-transition);
+              --theme-card-accent var(--theme-transition), --theme-text var(--theme-transition), --theme-text-soft var(--theme-transition),
+              --task-card-bg var(--theme-transition), --task-card-bg-hover var(--theme-transition), --task-card-border var(--theme-transition);
 
   /* layout numbers (from the reference at 780×360) */
   --pad-top: calc(16px + env(safe-area-inset-top, 0px));
@@ -116,7 +117,11 @@
   --card-h: clamp(72px, calc((100cqh - var(--heading-block) - 2 * var(--card-gap)) / 3), 98px);
   --tile-s: calc(var(--card-h) - 20px);
   flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--card-gap);
+  /* three cards fill the column exactly; any more scroll underneath the fixed heading (page never scrolls) */
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; margin: 0 -8px; padding: 0 8px; /* room for the highlight ring, same alignment */
 }
+.dv-stack::-webkit-scrollbar { display: none; }
 .dv-stack[hidden] { display: none; }
 
 /* the card: dark r28 body with a theme-tinted rim, tile left, title + status; a "Done" layer waits behind it */
@@ -124,12 +129,13 @@
 .dv-card-body {
   position: absolute; inset: 0; display: flex; align-items: center; gap: clamp(12px, 4.5cqw, 18px);
   padding: 0 16px 0 10px; border-radius: var(--card-radius);
-  background: var(--card-dark); color: var(--text-on-dark);
-  box-shadow: var(--shadow-card), inset 0 0 0 1px var(--theme-card-accent);
+  background: var(--task-card-bg); color: var(--text-on-dark);
+  box-shadow: var(--shadow-card), inset 0 0 0 1px var(--task-card-border);
   transform: translateX(var(--dx, 0px));
   transition: transform 420ms var(--ease-content), opacity 300ms var(--ease-out);
   will-change: transform;
 }
+.dv-card.is-touching .dv-card-body { background: var(--task-card-bg-hover); }
 .dv-card.is-swiping .dv-card-body { transition: none; }
 .dv-card.is-done .dv-card-body { opacity: 0; transition: transform 380ms var(--ease-out), opacity 260ms var(--ease-out); }
 .dv-done {
@@ -182,7 +188,7 @@
 @keyframes dv-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
 /* confirmation pulse on the cards attn just touched */
 .dv-card.is-highlight .dv-card-body { animation: dv-highlight 1200ms ease-in-out 2; }
-@keyframes dv-highlight { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0), var(--shadow-card), inset 0 0 0 1px var(--theme-card-accent); } 50% { box-shadow: 0 0 0 7px rgba(255,255,255,.55), var(--shadow-card), inset 0 0 0 1px var(--theme-card-accent); } }
+@keyframes dv-highlight { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0), var(--shadow-card), inset 0 0 0 1px var(--task-card-border); } 50% { box-shadow: 0 0 0 7px rgba(255,255,255,.55), var(--shadow-card), inset 0 0 0 1px var(--task-card-border); } }
 
 /* ---------------------------------------------------------- Deep Focus audio: the visible player takes the mascot's place */
 .dv-player { width: min(100%, 300px); border-radius: 18px; overflow: hidden; background: var(--card-dark); box-shadow: var(--shadow-card); flex: none; }

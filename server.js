@@ -223,6 +223,15 @@ app.get('/', page('index.html'));
 app.get('/control', page('control.html'));
 app.get('/control/completed', page('completed.html'));
 app.get('/device', page('device.html'));
+// the manifest follows the active theme, so the splash and title bar of a fresh install match the device
+const THEME_COLOURS = { sky: '#25B4F5', lime: '#B7EA43', blush: '#FF83C5', sun: '#FFD54E' };
+app.get('/manifest.json', (req, res) => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(PUBLIC_DIR, 'manifest.json'), 'utf8'));
+  const colour = THEME_COLOURS[state.device?.theme] || manifest.theme_color;
+  manifest.theme_color = colour;
+  manifest.background_color = colour;
+  res.set('Cache-Control', 'no-cache').type('application/manifest+json').json(manifest);
+});
 
 app.use(express.static(PUBLIC_DIR, {
   setHeaders(res, filePath) {

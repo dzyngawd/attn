@@ -115,6 +115,9 @@
 @property --theme-text { syntax: '<color>'; inherits: true; initial-value: #ffffff; }
 @property --theme-text-soft { syntax: '<color>'; inherits: true; initial-value: rgba(255,255,255,.86); }
 @property --theme-canvas-tint { syntax: '<color>'; inherits: true; initial-value: rgba(37,180,245,.10); }
+@property --task-card-bg { syntax: '<color>'; inherits: true; initial-value: #0E2A3A; }
+@property --task-card-bg-hover { syntax: '<color>'; inherits: true; initial-value: #15394A; }
+@property --task-card-border { syntax: '<color>'; inherits: true; initial-value: rgba(37,180,245,.32); }
 
 /* ================================================================ themes
    Four airy palettes. device.theme in the shared state sets [data-theme] on
@@ -129,6 +132,9 @@
      --theme-card-accent translucent primary used as the dark card's rim
      --theme-deep        a slightly deeper primary for the very top of the sky
      --theme-text        text colour that stays readable ON the gradient
+     --task-card-bg      the task card: a deep, rich dark of the same hue (white text stays on it)
+     --task-card-bg-hover a touch lighter, for the pressed card
+     --task-card-border  the card rim: translucent primary
                          (white on the darker skies, ink on the light ones) */
 :root, [data-theme="sky"] {
   --theme-primary: #25B4F5;
@@ -142,6 +148,9 @@
   --theme-text-soft: rgba(255,255,255,.86);
   --theme-shadow: rgba(0,60,120,.10);
   --theme-canvas-tint: rgba(37,180,245,.10);
+  --task-card-bg: #0E2A3A;
+  --task-card-bg-hover: #15394A;
+  --task-card-border: rgba(37,180,245,.32);
 }
 [data-theme="lime"] {
   --theme-primary: #B7EA43;
@@ -155,6 +164,9 @@
   --theme-text-soft: rgba(16,16,18,.78);
   --theme-shadow: rgba(60,90,0,.10);
   --theme-canvas-tint: rgba(183,234,67,.14);
+  --task-card-bg: #24320F;
+  --task-card-bg-hover: #314317;
+  --task-card-border: rgba(183,234,67,.34);
 }
 [data-theme="blush"] {
   --theme-primary: #FF83C5;
@@ -168,6 +180,9 @@
   --theme-text-soft: rgba(255,255,255,.88);
   --theme-shadow: rgba(120,20,70,.10);
   --theme-canvas-tint: rgba(255,131,197,.12);
+  --task-card-bg: #3A182B;
+  --task-card-bg-hover: #4A2138;
+  --task-card-border: rgba(255,131,197,.34);
 }
 [data-theme="sun"] {
   --theme-primary: #FFD54E;
@@ -181,6 +196,9 @@
   --theme-text-soft: rgba(16,10,0,.78);
   --theme-shadow: rgba(120,80,0,.10);
   --theme-canvas-tint: rgba(255,213,78,.14);
+  --task-card-bg: #3A2E0E;
+  --task-card-bg-hover: #4B3B13;
+  --task-card-border: rgba(255,213,78,.36);
 }
 
 /* Tile colour by item type — used by both the device and the Control Centre. */

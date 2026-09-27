@@ -13,7 +13,7 @@
  *
  * Layout (measured from the design reference at 780×360):
  *   left  ≈ 51%  clock (Agbalumo) · date · the attn face, centred on one axis
- *   right ≈ 49%  "Needs attn. (N)" · up to MAX_VISIBLE dark cards, never scrolling
+ *   right ≈ 49%  "Needs attn. (N)" fixed · the dark cards below scroll when more than three (the page never does)
  * All enabled list modules feed ONE stack, ordered by urgency (timed items first,
  * soonest first). Focus mode takes the first card while it is on; a Quick note the last.
  * N counts every outstanding item even when only three are drawn.
@@ -37,7 +37,7 @@ import { MODULE_META, THEMES } from './state.js';
 import { tileSvg } from './icons.js';
 import { LOGO_SVG } from './brand.js';
 
-const MAX_VISIBLE = 3;
+const FIT_CARDS = 3; // how many cards fill the column; the rest scroll underneath the heading
 const LEAVE_MS = 420;
 const REACT_MS = 1400;       // how long the face reacts to new content
 const HIGHLIGHT_MS = 2600;
@@ -365,7 +365,7 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
     applyTheme(state.device?.theme);
     const now = Date.now();
     const { entries, total } = stackEntries(state);
-    const shown = entries.slice(0, MAX_VISIBLE);
+    const shown = entries; // every card is reachable: the stack scrolls
     let added = 0;
     for (const el of liveChildren(els.stack)) if (!shown.some((e) => e.key === el.dataset.key)) leave(el);
     const desired = shown.map((entry, i) => {

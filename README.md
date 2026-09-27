@@ -159,6 +159,8 @@ edit code  →  git commit && git push  →  host redeploys  →  refresh / reop
 
 ## Install attn on Android
 
+The manifest asks for `display: fullscreen` (with `standalone` as the fallback via `display_override`) and landscape; `/manifest.json` is served by the server so its `theme_color`/`background_color` follow the active theme. On launch, and again on the first tap (the Enable Andrew tap), the device asks for the Fullscreen API and a landscape orientation lock where the browser allows it. The page itself never scrolls: only the task list under the fixed "Needs attn. (N)" heading scrolls when there are more than three cards, with swipe-right-to-complete still working on each card. Task cards use a deep tint of the current theme (`--task-card-bg`, `--task-card-bg-hover`, `--task-card-border` in `public/css/tokens.css`) instead of black.
+
 1. Open `https://<app>/device` in Chrome on the phone.
 2. Tap **Install attn** at the bottom of the screen (or Chrome menu ⋮ → *Add to Home screen* / *Install app*).
 3. Launch it from the home screen: it opens full-screen, **landscape** (the app asks the OS to lock it; held upright it shows "Rotate attn"), straight into the device, and reconnects to the same backend.
