@@ -14,7 +14,14 @@
  * goes through — the screen does not even change for ambient speech; in ACTIVE
  * mode (just woken, answering a question, or the short follow-up window after a
  * reply) the next utterance is the command. Only then is response.create sent,
- * so no tool can run for room talk. Ignored turns are deleted from the session. No Chrome SpeechRecognition,
+ * so no tool can run for room talk. Ignored turns are deleted from the session.
+ *
+ * SPOKEN REMINDERS: reminders.js arms one timer for the next due reminder in the
+ * state; when it fires (page open, session connected) the reminder is marked on
+ * the server and Andrew is asked to say it with a manual response.create.
+ * DEEP FOCUS AUDIO: focus-player.js drives one visible YouTube player from the
+ * focus state (musicPlaying + currentTrackId); a blocked autoplay shows a one-tap
+ * "Start focus audio" button inside the card. No Chrome SpeechRecognition,
  * no SpeechSynthesis, no Gemini on this path. The UI states come from REAL
  * events: speech_started → listening, speech_stopped → processing, function
  * call → processing, output_audio_buffer.started → speaking (actual playback),
@@ -25,6 +32,8 @@
 import { api } from './api.js';
 import { normalizeState } from './state.js';
 import { splitWake } from './wake.js';
+import { createReminderScheduler } from './reminders.js';
+import { createFocusPlayer } from './focus-player.js';
 
 const OPENAI_CALLS_URL = 'https://api.openai.com/v1/realtime/calls';
 const MIC_TIMEOUT_MS = 20000;
@@ -64,7 +73,26 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   let activeTimer = null;
   let transcriptTimer = null;
   let askedQuestion = false;
+  let reminderSpeaking = false;
   const events = []; // debug ring buffer
+
+  // ---- spoken reminders + focus audio are driven from the shared state
+  const focusPlayer = createFocusPlayer({
+    log: (...a) => console.log('[Focus]', ...a),
+    onBlocked: () => device.setAudioBlocked(true),
+    onState: (code) => { // YT.PlayerState: -1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued
+      const names = { '-1': 'unstarted', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'cued' };
+      console.log('[Focus] player', names[code] ?? code);
+      if (code === 1) device.setAudioBlocked(false);
+    },
+  });
+  let lastFocus = { musicPlaying: false, currentTrackId: null };
+  const reminders = createReminderScheduler({
+    log: (...a) => console.log('[Reminder]', ...a),
+    canFire: () => connected && dc?.readyState === 'open' && (status === 'idle' || status === 'success' || status === 'clarifying'),
+    markTriggered: async (itemId) => { const r = await api.reminderTriggered(itemId); if (r?.state) { try { device.update(normalizeState(r.state)); } catch { /* ignore */ } } return r; },
+    onDue: (item) => speakReminder(item),
+  });
   const audioEl = document.createElement('audio');
   audioEl.autoplay = true;
   audioEl.setAttribute('playsinline', '');
@@ -138,6 +166,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
       set('idle');
       log(`session ready (${token.model}, voice ${token.voice})`);
       scheduleInstructionRefresh();
+      setTimeout(() => reminders.recheck(), 800); // anything that came due while disconnected
     } catch (err) {
       connecting = false;
       teardown();
@@ -219,6 +248,41 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
       scheduleInstructionRefresh();
     }, INSTRUCTIONS_REFRESH_MS);
   }
+
+  // ================================================================ reminders + focus audio
+  /** Andrew initiates: no wake phrase, just a short spoken reminder through the live session. */
+  function speakReminder(item) {
+    reminderSpeaking = true;
+    clearTimeout(activeTimer);
+    setMode('active', 'reminder');
+    replyText = '';
+    set('processing', { transcript: '' });
+    device.setHighlights({ itemIds: [item.id], modules: [] });
+    armWatchdog(PROCESSING_WATCHDOG_MS);
+    console.log('[Reminder] speaking via response.create:', item.title);
+    const sent = send({ type: 'response.create', response: { tool_choice: 'none', output_modalities: ['audio'], max_output_tokens: 120, instructions: `You are Andrew, the voice of the attn device. A reminder the user set earlier is due now. Say, warmly and in one short sentence, that it is time to: "${item.title}". For example: "Hey, it's time to ${item.title.toLowerCase()}." Nothing else.` } });
+    if (!sent) { reminderSpeaking = false; setMode('passive', 'reminder not sent'); set('idle'); throw new Error('voice session not open'); }
+  }
+
+  /** Keep the visible YouTube player in step with the focus state. */
+  function syncFocusAudio(state) {
+    const f = state?.modules?.focus || {};
+    const shouldPlay = Boolean(f.enabled && f.musicPlaying && f.currentTrackId);
+    const changed = shouldPlay !== lastFocus.musicPlaying || f.currentTrackId !== lastFocus.currentTrackId;
+    lastFocus = { musicPlaying: shouldPlay, currentTrackId: f.currentTrackId || null };
+    if (shouldPlay) {
+      const mount = device.focusMount();
+      if (!mount) return;
+      if (changed || !focusPlayer.mounted || focusPlayer.videoId !== f.currentTrackId) {
+        focusPlayer.play(mount, f.currentTrackId).catch((err) => console.log('[Focus] could not start audio:', err.message));
+      }
+    } else if (changed) {
+      focusPlayer.stop();
+      device.setAudioBlocked(false);
+    }
+  }
+  device.on('update', (state) => { reminders.sync(state); syncFocusAudio(state); });
+  device.on('startAudio', () => { focusPlayer.resume(); });
 
   // ================================================================ wake gate (passive / active)
   function setMode(mode, reason) {
@@ -396,6 +460,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   /** Audio finished (or a silent turn ended): step back to the dashboard, show what changed, keep listening for a follow-up. */
   function afterResponse() {
     clearTimeout(idleTimer);
+    if (reminderSpeaking) { reminderSpeaking = false; setMode('passive', 'reminder spoken'); toolChanged = false; pendingHighlights = { itemIds: [], modules: [] }; set('idle'); return; }
     askedQuestion = /\?\s*$/.test(replyText.trim());
     if (askedQuestion) {
       // a question: stay forward with it on the face and wait for the answer
@@ -437,6 +502,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     clearTimeout(transcriptTimer);
     toolChanged = false;
     askedQuestion = false;
+    reminderSpeaking = false;
     setMode('passive', 'error');
     set('error', { text: message });
     idleTimer = setTimeout(() => { if (status === 'error') set('idle'); }, ERROR_LINGER_MS);
@@ -470,6 +536,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { if (connected || connecting) stopSession('page hidden'); }
     else if (enabled && !connected) { reconnectAttempt = 0; connect(); }
+    if (document.visibilityState === 'visible') setTimeout(() => reminders.recheck(), 1000);
   });
 
   device.on('enable', () => enable());
@@ -498,6 +565,8 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     submitText,
     get status() { return status; },
     get mode() { return assistantMode; },
+    get reminders() { return reminders.pending; },
+    speakReminder,
     get connected() { return connected; },
     get events() { return events; },
     /** Debug only: feed a server event as if it came over the data channel. */

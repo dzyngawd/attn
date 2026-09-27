@@ -25,6 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeState, DEFAULT_STATE } from './public/js/state.js';
+import { markReminderTriggered } from './public/js/actions.js';
 import { handleCommand, ASSISTANT_NAME } from './lib/assistant.js';
 import { isConfigured, isMock, getModel, PROVIDER } from './lib/gemini.js';
 import * as realtime from './lib/realtime.js';
@@ -153,6 +154,17 @@ app.post('/api/realtime/tool', (req, res) => {
     console.error('[Realtime] tool crashed:', err);
     noStore(res).json({ ok: true, call_id: callId, output: { success: false, error: 'attn could not run that action.' }, changed: false, highlightItemIds: [] });
   }
+});
+
+// The device's reminder scheduler marks a spoken reminder as done the moment it fires (never twice).
+app.post('/api/reminders/triggered', (req, res) => {
+  const itemId = typeof req.body?.itemId === 'string' ? req.body.itemId : '';
+  const working = structuredClone(state);
+  const r = markReminderTriggered(working, { itemId });
+  if (!r.ok) return noStore(res).status(404).json({ ok: false, error: 'not_found' });
+  const saved = applyState(working);
+  console.log(`[Reminder] spoken: ${itemId}`);
+  noStore(res).json({ ok: true, state: saved });
 });
 
 app.post('/api/realtime/instructions', (req, res) => {

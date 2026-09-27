@@ -81,7 +81,7 @@ export const DEFAULT_STATE = {
     ] },
     calendar: { enabled: false, title: 'Upcoming', items: [] },
     mail: { enabled: false, title: 'Important email', items: [] },
-    focus: { enabled: false, title: 'Focus mode', subtitle: 'Deep work' },
+    focus: { enabled: false, title: 'Focus mode', subtitle: 'Deep work', notificationsBlocked: false, musicPlaying: false, currentTrackId: null, startedAt: null },
     note: { enabled: false, title: 'Quick note', text: '' },
   },
 };
@@ -97,8 +97,8 @@ export function newId() {
 }
 
 /** `at` is an optional ISO instant (set by the assistant); `subtitle` stays the human label. */
-export function createItem({ title = '', subtitle = '', type = 'manual', at = null } = {}) {
-  return { id: newId(), title, subtitle, type: oneOf(type, ITEM_TYPES, 'manual'), at: isoOrNull(at) };
+export function createItem({ title = '', subtitle = '', type = 'manual', at = null, spokenReminder = false } = {}) {
+  return { id: newId(), title, subtitle, type: oneOf(type, ITEM_TYPES, 'manual'), at: isoOrNull(at), spokenReminder: Boolean(spokenReminder), reminderTriggered: false };
 }
 
 const isoOrNull = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null);
@@ -112,6 +112,8 @@ function normalizeItem(raw) {
     subtitle: str(raw.subtitle, '', LIMITS.subtitle),
     type: oneOf(raw.type, ITEM_TYPES, 'manual'),
     at: isoOrNull(raw.at),
+    spokenReminder: Boolean(raw.spokenReminder), // Andrew speaks it when `at` arrives (device open)
+    reminderTriggered: Boolean(raw.reminderTriggered),
   };
 }
 
@@ -147,6 +149,11 @@ export function normalizeState(input) {
       mod.items = (Array.isArray(m.items) ? m.items : []).map(normalizeItem).filter(Boolean).slice(0, LIMITS.items);
     } else if (meta.kind === 'focus') {
       mod.subtitle = str(m.subtitle, '', LIMITS.subtitle);
+      // Deep Focus demo flags: "blocked" is presentation only (no real Android settings are touched)
+      mod.notificationsBlocked = Boolean(m.notificationsBlocked);
+      mod.musicPlaying = Boolean(m.musicPlaying);
+      mod.currentTrackId = typeof m.currentTrackId === 'string' && m.currentTrackId ? m.currentTrackId.slice(0, 20) : null;
+      mod.startedAt = typeof m.startedAt === 'string' && !Number.isNaN(Date.parse(m.startedAt)) ? m.startedAt : null;
     } else if (meta.kind === 'note') {
       mod.text = str(m.text, '', LIMITS.note);
     }

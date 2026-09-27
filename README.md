@@ -46,9 +46,17 @@ Production voice is **OpenAI Realtime over WebRTC** (`VOICE_PROVIDER=openai`, th
 4. The face states come from real events: speech start → listening, speech stop → processing, tool calls → processing, audio playback start → speaking, playback end → success with the changed cards highlighted. Interruptions are handled by the session (barge-in).
 5. If the connection drops the device reconnects with backoff; if the page is hidden the session stops and resumes when it is visible again.
 
-Tools exposed: `add_item`, `update_item`, `remove_item`, `set_module_visibility`, `set_focus`, `set_note`, plus read-only `query_attn_state` and `highlight_items`.
+Tools exposed: `add_item`, `update_item`, `remove_item`, `set_module_visibility`, `set_focus`, `set_note`, `schedule_reminder`, `start_focus_music`, `stop_focus_music`, `end_focus_mode`, plus read-only `query_attn_state` and `highlight_items`.
 
-**Intentionally unsupported** (Andrew says so instead of pretending): sending or reading email, real calendars, playing music or audio, alarms/notifications, calls, browsing, long-term memory.
+**Intentionally unsupported** (Andrew says so instead of pretending): sending or reading email, real calendars, audio other than the focus playlist, OS alarms/notifications, calls, browsing, long-term memory.
+
+### Spoken reminders
+
+"Hey Andrew, remind me to catch my bus in five minutes" calls `schedule_reminder`, which stores a normal *Pay attention to* item with a real `at` timestamp (computed in the device's own timezone from "in five minutes", "in ten seconds" or "at 3:30"), `spokenReminder: true` and `reminderTriggered: false`; the card shows the due time. Andrew confirms in one line. The device (`public/js/reminders.js`) keeps **one** timer for the next pending reminder and re-arms it on every state load, poll, tool result, reconnect and return to the foreground, so nothing is lost on a refresh. When it is due the device first marks it triggered on the server (`POST /api/reminders/triggered`, so it fires exactly once even from two screens), then asks the live Realtime session to speak it (`response.create` with explicit instructions, no wake phrase): "Hey, it's time to catch your bus." The card pulses while he says it. This only works while the PWA is open and in the foreground with the session connected: there are no OS alarms or push notifications. A reminder found overdue after the page was closed is still spoken, just late.
+
+### Deep Focus + frequency music
+
+"Hey Andrew, I'm about to go into deep focus mode. Block all notifications." turns the Focus card into *Deep Focus · Notifications blocked*. **The blocking is a demo label only**: nothing on the phone changes and Andrew is told never to claim otherwise. He then asks "Do you want me to play some frequency music?" and stays active. "Yes" → `start_focus_music` picks a random track from `public/js/focus-tracks.js` (hardcoded PureGritStudio YouTube videos) and the device plays it with the official YouTube IFrame Player API in a visible player inside the Focus card (`public/js/focus-player.js`); Andrew says "Alright. Starting your focus session." and goes quiet. If the browser blocks autoplay, a one-tap **Start focus audio** button appears under the player. "Hey Andrew, stop the music" → `stop_focus_music` (Focus stays on); "Hey Andrew, end focus mode" → `end_focus_mode` (music stops, dashboard returns). Nothing is downloaded or cached, no YouTube Data API, account, cookies or Premium are involved, and playback obeys whatever YouTube allows for the embed.
 
 ### Configure
 
@@ -75,7 +83,9 @@ Tools exposed: `add_item`, `update_item`, `remove_item`, `set_module_visibility`
 - "Hey Andrew, get me to pay attention to my design review at 2:30 and add it to my calendar."
 - "Hey Andrew, remind me to book my flight to Frankfurt later today." → "What time today?" → "Five."
 - "Hey Andrew, what should I pay attention to over the next three hours?"
-- "Hey Andrew, give me an hour of focus starting at ten." · "Hey Andrew, play some deep focus music."
+- "Hey Andrew, remind me to catch my bus in five minutes." · "Hey Andrew, remind me in ten seconds to drink water." (test)
+- "Hey Andrew, I'm about to go into deep focus mode. Block all notifications." → "Do you want me to play some frequency music?" → "Yes." · "Hey Andrew, stop the music." · "Hey Andrew, end focus mode."
+- "Hey Andrew, give me an hour of focus starting at ten."
 - "Hey Andrew, hide the email things." · "Hey Andrew, put a note saying call Mum." · "Hey Andrew, I'm done with the design review."
 
 ### Browser notes
@@ -85,14 +95,14 @@ Needs a browser with WebRTC and microphone access (Chrome on Android is the targ
 ## Where state lives
 
 - **Runtime:** `data/state.json` (git-ignored). Written atomically on every save, loaded on boot.
-- **Shape + defaults:** `public/js/state.js`. Imported by the server *and* both frontends, so validation happens in one place. `normalizeState()` turns any malformed or partial input into a valid state. Items carry an optional `at` timestamp (set by the assistant); `subtitle` stays the human label.
+- **Shape + defaults:** `public/js/state.js`. Imported by the server *and* both frontends, so validation happens in one place. `normalizeState()` turns any malformed or partial input into a valid state. Items carry an optional `at` timestamp (set by the assistant) plus `spokenReminder` / `reminderTriggered` flags; `subtitle` stays the human label. The focus module carries `notificationsBlocked`, `musicPlaying`, `currentTrackId` and `startedAt`.
 - **Mutations:** `public/js/actions.js` — every change, from the Control Centre or the assistant, goes through these functions.
 - **Ephemeral hosts:** if the server ever restarts empty (fresh deploy on Replit Autoscale / Render free), the Control Centre restores its localStorage backup automatically. Set `ATTN_STATE_FILE=/some/volume/state.json` on hosts with a persistent disk.
 
 ## Project layout
 
 ```
-server.js                  Express: static files + /api/state + /api/status + /api/assistant/* + JSON persistence
+server.js                  Express: static files + /api/state + /api/status + /api/assistant/* + /api/realtime/* + /api/reminders/triggered + JSON persistence
 lib/assistant.js           AI command router: prompt, function declarations, validation, execution, conversation memory
 lib/realtime.js            OpenAI Realtime bridge: client secrets, session config (instructions, voice, VAD, tools), tool execution
 lib/gemini.js              legacy provider (VOICE_PROVIDER=legacy only)
@@ -108,7 +118,10 @@ public/
   js/api.js                fetch wrapper with timeouts
   js/render-device.js      the device renderer (used by /device AND the live preview)
   js/device.js             device boot: polling, clock, PWA install, service worker, assistant
-  js/realtime.js           the production voice client: WebRTC session, real events → UI states, tool bridge
+  js/realtime.js           the production voice client: WebRTC session, real events → UI states, tool bridge, spoken reminders, focus audio
+  js/reminders.js          one-timer scheduler for spoken reminders (marks on the server, then Andrew speaks)
+  js/focus-player.js       the visible YouTube IFrame player for Deep Focus audio
+  js/focus-tracks.js       the hardcoded PureGritStudio track list (edit here to change the playlist)
   js/assistant.js          legacy voice client (Chrome speech + Gemini), rollback only
   js/control.js            Control Centre: sources, modules, autosave, status, preview
   js/icons.js  js/brand.js tile glyphs, wordmark

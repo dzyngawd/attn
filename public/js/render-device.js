@@ -173,7 +173,7 @@ function createModule(id) {
   if (meta.kind === 'list') {
     el.innerHTML = '<h2 class="dv-eyebrow"></h2><div class="dv-items"></div><div class="dv-more" hidden></div><div class="dv-placeholder" hidden>Nothing here yet</div>';
   } else if (meta.kind === 'focus') {
-    el.innerHTML = `<article class="dv-card dv-card-focus"><div class="dv-tile" data-type="focus">${tileSvg('focus')}</div><div class="dv-card-text"><div class="dv-card-title"></div><div class="dv-card-sub"></div></div><span class="dv-live" aria-hidden="true"></span></article>`;
+    el.innerHTML = `<article class="dv-card dv-card-focus"><div class="dv-tile" data-type="focus">${tileSvg('focus')}</div><div class="dv-card-text"><div class="dv-card-title"></div><div class="dv-card-sub"></div><div class="dv-card-meta" hidden></div></div><span class="dv-live" aria-hidden="true"></span></article><div class="dv-player" hidden><div class="dv-player-frame"></div><button class="dv-player-start" type="button" hidden>Start focus audio</button></div>`;
   } else {
     el.innerHTML = `<h2 class="dv-eyebrow"></h2><article class="dv-card dv-card-note"><div class="dv-tile" data-type="note">${tileSvg('note')}</div><div class="dv-card-text"><p class="dv-note-text"></p></div></article>`;
   }
@@ -227,6 +227,13 @@ function fillModule(el, id, mod) {
     const sub = el.querySelector('.dv-card-sub');
     setText(sub, mod.subtitle);
     sub.hidden = !mod.subtitle.trim();
+    // Deep Focus demo flags (nothing on the phone is really changed)
+    const flags = [mod.notificationsBlocked ? 'Notifications blocked' : '', mod.musicPlaying ? 'Focus audio playing' : ''].filter(Boolean);
+    const metaEl = el.querySelector('.dv-card-meta');
+    setText(metaEl, flags.join(' · '));
+    metaEl.hidden = flags.length === 0;
+    el.classList.toggle('is-music', Boolean(mod.musicPlaying));
+    el.querySelector('.dv-player').hidden = !mod.musicPlaying;
     return 0;
   }
   setText(el.querySelector('.dv-eyebrow'), mod.title.trim() || meta.label);
@@ -257,7 +264,7 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
   let reactTimer = null;
   let installHandler = null;
   let highlightTimer = null;
-  const handlers = { talk: [], faceTap: [], submitText: [], enable: [] };
+  const handlers = { talk: [], faceTap: [], submitText: [], enable: [], update: [], startAudio: [] };
   let assistantState = 'idle';
   let hideTimer = null;
   const emit = (event, ...args) => handlers[event].forEach((fn) => fn(...args));
@@ -290,6 +297,18 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
     if (!firstRender && added > 0) react();
     else if (!reactTimer) applyExpression();
     firstRender = false;
+    emit('update', state);
+  }
+
+  /** The visible YouTube player slot inside the Focus card (null when the card is not on screen). */
+  function focusMount() {
+    const module = findChild(els.stack, 'module', 'focus');
+    return module && !module.classList.contains('is-leaving') ? module.querySelector('.dv-player-frame') : null;
+  }
+  /** Autoplay was blocked: offer the one-tap start inside the Focus card. */
+  function setAudioBlocked(blocked) {
+    const btn = els.stack.querySelector('.dv-module[data-module="focus"] .dv-player-start');
+    if (btn) btn.hidden = !blocked;
   }
 
   function setClock(date) {
@@ -395,8 +414,9 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
     els.fmAction.addEventListener('click', () => emit('faceTap', assistantState, true));
     els.typeToggle.addEventListener('click', () => setTypeBox(els.typebox.hidden));
     els.typebox.addEventListener('submit', (e) => { e.preventDefault(); const text = els.typeInput.value.trim(); if (!text) return; els.typeInput.value = ''; emit('submitText', text); });
+    els.stack.addEventListener('click', (e) => { if (e.target.closest('.dv-player-start')) emit('startAudio'); });
     els.typeInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') setTypeBox(false); });
   }
 
-  return { root, update, setClock, setConnection, setInstall, setAssistantState, setExpression, setHighlights, setTypeBox, setAssistantName, setSetup, on, get assistantState() { return assistantState; } };
+  return { root, update, setClock, setConnection, setInstall, setAssistantState, setExpression, setHighlights, setTypeBox, setAssistantName, setSetup, focusMount, setAudioBlocked, on, get assistantState() { return assistantState; } };
 }

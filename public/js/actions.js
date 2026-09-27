@@ -25,11 +25,11 @@ export function findItem(state, itemId) {
   return null;
 }
 
-export function addItem(state, { module = 'attention', title = '', subtitle = '', type, at = null } = {}) {
+export function addItem(state, { module = 'attention', title = '', subtitle = '', type, at = null, spokenReminder = false } = {}) {
   if (!LIST_MODULES.includes(module)) return { ok: false, message: `There is no "${module}" list.` };
   const mod = state.modules[module];
   if (mod.items.length >= LIMITS.items) return { ok: false, message: `${mod.title || MODULE_META[module].label} is full (${LIMITS.items} items).` };
-  const item = createItem({ title: str(title, LIMITS.title), subtitle: str(subtitle, LIMITS.subtitle), type: ITEM_TYPES.includes(type) ? type : MODULE_META[module].type });
+  const item = createItem({ title: str(title, LIMITS.title), subtitle: str(subtitle, LIMITS.subtitle), type: ITEM_TYPES.includes(type) ? type : MODULE_META[module].type, spokenReminder: Boolean(spokenReminder && at) });
   if (at) item.at = at;
   mod.items.push(item);
   mod.enabled = true; // something new to look at should be visible
@@ -42,7 +42,7 @@ export function updateItem(state, { itemId, title, subtitle, type, at, module } 
   const { item } = found;
   if (typeof title === 'string' && title.trim()) item.title = str(title, LIMITS.title);
   if (typeof subtitle === 'string') item.subtitle = str(subtitle, LIMITS.subtitle);
-  if (at !== undefined) item.at = at || null;
+  if (at !== undefined) { if (at && at !== item.at) item.reminderTriggered = false; item.at = at || null; if (!item.at) item.spokenReminder = false; }
   if (ITEM_TYPES.includes(type)) item.type = type;
   let target = found.module;
   if (module && module !== found.module && LIST_MODULES.includes(module)) {
@@ -69,9 +69,12 @@ export function setModuleVisibility(state, { module, enabled } = {}) {
   return { ok: true, message: `${enabled ? 'Showing' : 'Hid'} ${state.modules[module].title || MODULE_META[module].label}.`, module };
 }
 
-export function setFocus(state, { enabled = true, title, subtitle } = {}) {
+export function setFocus(state, { enabled = true, title, subtitle, notificationsBlocked } = {}) {
   const focus = state.modules.focus;
   focus.enabled = Boolean(enabled);
+  if (typeof notificationsBlocked === 'boolean') focus.notificationsBlocked = notificationsBlocked; // presentation only
+  if (focus.enabled && !focus.startedAt) focus.startedAt = new Date().toISOString();
+  if (!focus.enabled) { focus.musicPlaying = false; focus.currentTrackId = null; focus.notificationsBlocked = false; focus.startedAt = null; }
   if (typeof title === 'string' && title.trim()) focus.title = str(title, LIMITS.moduleTitle);
   if (typeof subtitle === 'string') focus.subtitle = str(subtitle, LIMITS.subtitle);
   // attn cannot play audio: say so whenever the focus block is about music, even in the plain fallback wording
@@ -85,6 +88,48 @@ export function setNote(state, { text = '', append = false } = {}) {
   note.text = str(next, LIMITS.note);
   note.enabled = true;
   return { ok: true, message: note.text ? 'Note updated.' : 'Note cleared.', module: 'note' };
+}
+
+/** A reminder Andrew will SAY when its time comes (only while the device is open). */
+export function scheduleReminder(state, { title = '', at = null, subtitle = '' } = {}) {
+  if (!at) return { ok: false, message: 'A spoken reminder needs a time.' };
+  return addItem(state, { module: 'attention', title, subtitle, type: 'task', at, spokenReminder: true });
+}
+
+/** Device-side scheduler: a due reminder is marked once so it can never fire twice. */
+export function markReminderTriggered(state, { itemId } = {}) {
+  const found = findItem(state, itemId);
+  if (!found) return { ok: false, message: 'Reminder not found.' };
+  found.item.reminderTriggered = true;
+  return { ok: true, message: `Reminder "${found.item.title}" spoken.`, itemId: found.item.id, module: found.module };
+}
+
+/** Demo focus audio: the device plays the configured YouTube track; `trackId` is chosen by the caller. */
+export function startFocusMusic(state, { trackId } = {}) {
+  const focus = state.modules.focus;
+  if (!trackId) return { ok: false, message: 'No focus track configured.' };
+  focus.enabled = true;
+  focus.musicPlaying = true;
+  focus.currentTrackId = String(trackId).slice(0, 20);
+  if (!focus.startedAt) focus.startedAt = new Date().toISOString();
+  return { ok: true, message: 'Focus audio started.', module: 'focus' };
+}
+
+export function stopFocusMusic(state) {
+  const focus = state.modules.focus;
+  const was = focus.musicPlaying;
+  focus.musicPlaying = false;
+  return { ok: true, message: was ? 'Focus audio stopped.' : 'No focus audio was playing.', module: 'focus' };
+}
+
+export function endFocusMode(state) {
+  const focus = state.modules.focus;
+  focus.enabled = false;
+  focus.musicPlaying = false;
+  focus.currentTrackId = null;
+  focus.notificationsBlocked = false;
+  focus.startedAt = null;
+  return { ok: true, message: 'Focus mode ended.', module: 'focus' };
 }
 
 export function moveModule(state, { module, direction } = {}) {
@@ -154,6 +199,26 @@ export const ASSISTANT_ACTIONS = {
     description: 'Write free text on the Quick note card (replace, or append when the user adds to it).',
     params: { text: 'the note text, max 240 characters', append: 'true to add to the existing note instead of replacing it' },
     run: setNote,
+  },
+  schedule_reminder: {
+    description: 'A reminder attn will SAY out loud when its time comes, while the device is open: "remind me to catch my bus in five minutes", "remind me about my meeting at 3:30". Creates an item on Pay attention to with a real due time.',
+    params: { title: 'what to remind, as a short sentence case phrase without the time', dueAt: 'local time YYYY-MM-DDTHH:mm (or use inMinutes / inSeconds for relative requests)', inMinutes: 'minutes from now', inSeconds: 'seconds from now (testing)' },
+    run: scheduleReminder,
+  },
+  start_focus_music: {
+    description: 'Play a random track from the configured focus playlist (frequency music) inside the Focus card. Only after the user agreed.',
+    params: {},
+    run: startFocusMusic,
+  },
+  stop_focus_music: {
+    description: 'Stop the focus music but stay in Focus mode: "stop the music", "turn that off", "that is enough music".',
+    params: {},
+    run: stopFocusMusic,
+  },
+  end_focus_mode: {
+    description: 'Leave Focus mode entirely: stops any music, hides the Focus card: "end focus mode", "I am done focusing".',
+    params: {},
+    run: endFocusMode,
   },
 };
 export const ASSISTANT_ACTION_TYPES = Object.keys(ASSISTANT_ACTIONS);
