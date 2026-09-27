@@ -10,9 +10,9 @@ services:
     autoDeploy: true
     healthCheckPath: /api/status
     envVars:
-      - key: ANTHROPIC_API_KEY   # set in the Render dashboard (Environment tab); never in git
+      - key: GEMINI_API_KEY      # set in the Render dashboard (Environment tab); never in git
         sync: false
-      - key: ANTHROPIC_MODEL
-        value: claude-opus-5
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash
       - key: ASSISTANT_NAME
         value: Andrew

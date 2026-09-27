@@ -5,7 +5,7 @@
 ```
 Control Centre (laptop)  →  shared state (one JSON object)  →  Device (phone)
                                        ↑
-            Voice / typed command  →  Claude  →  validated actions
+            Voice / typed command  →  Gemini  →  validated actions
 ```
 
 Change something in the Control Centre and it appears on the phone within a second or two. Tap the face on the phone and talk: attn ("Andrew") turns natural language into the same state changes. No real integrations yet.
@@ -42,9 +42,9 @@ Tap the face or the **Talk to Andrew** pill on `/device`, speak, and attn:
 
 1. captures speech in the browser (Web Speech API, tap-to-talk, never always-on),
 2. POSTs the transcript to `/api/assistant/command` with the current time, timezone and locale,
-3. asks Claude for a **structured** reply (`execute` / `clarify` / `respond` + an ordered action list) using structured outputs, never free prose,
+3. asks Gemini which of the whitelisted **functions** to call (the action registry plus `clarify` and `respond`), never free-form parsing,
 4. validates every action, runs the whitelisted ones through `public/js/actions.js` (the same functions the Control Centre uses), saves through the normal persistence path,
-5. applies the new state on the device immediately, pulses the cards it touched, and speaks a short confirmation (SpeechSynthesis).
+5. sends the real results back to Gemini for one short spoken sentence (with a deterministic fallback that never hides a failure), applies the new state on the device immediately, pulses the cards it touched, and speaks (SpeechSynthesis).
 
 The keyboard button opens a typed command box that goes through the exact same pipeline (also handy for debugging). `lib/assistant.js` holds the prompt, the reply schema, validation and a ten-minute conversation memory per device, enough for "What time today?" → "Five." and "Actually make that 3:30."
 
@@ -56,12 +56,19 @@ The keyboard button opens a typed command box that goes through the exact same p
 
 | Variable | Required | What |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | yes | Server-side only. Never shipped to the browser, never committed. |
-| `ANTHROPIC_MODEL` | no | Default `claude-opus-5`. |
+| `GEMINI_API_KEY` | yes | Server-side only. Never shipped to the browser, never committed. |
+| `GEMINI_MODEL` | no | Default `gemini-3.8-flash`. `gemini-3.5-flash-lite` is the cheaper/faster option; `gemini-flash-latest` always points at the newest Flash. |
+| `GEMINI_THINKING_LEVEL` | no | `LOW` (default), `MEDIUM`, `HIGH` or `off`. Lower is faster. |
 | `ASSISTANT_NAME` | no | Default `Andrew`. Used in speech, on screen and as an optional wake word. |
-| `ATTN_ASSISTANT_MOCK` | no | `1` answers with a built-in stub instead of Claude (dev/testing only). |
+| `ATTN_ASSISTANT_MOCK` | no | `1` answers with a built-in stub instead of Gemini (dev/testing only). |
 
-Locally: copy `.env.example` to `.env`. On Render: service → **Environment** → add `ANTHROPIC_API_KEY` (the other two have defaults). `GET /api/assistant/status` shows whether the key is picked up.
+**Get a key:** open [Google AI Studio](https://aistudio.google.com/apikey), sign in with a Google account, click *Create API key* and copy it. The free tier costs nothing; on the free tier Google may use prompts and responses to improve its products, so keep demo content non-sensitive (paid-tier data is not used that way).
+
+**Locally:** copy `.env.example` to `.env` and paste the key after `GEMINI_API_KEY=`.
+
+**On Render:** Dashboard → the `attn` service → **Environment** → *Add Environment Variable* → key `GEMINI_API_KEY`, value = the key → *Save Changes*. Render restarts the service automatically. `GET /api/assistant/status` shows `configured: true` once it is picked up.
+
+**Free-tier limits:** per-model requests-per-minute and per-day caps apply and change over time; see your live numbers at [aistudio.google.com/rate-limit](https://aistudio.google.com/rate-limit). When a cap is hit the API answers 429 and Andrew says he is getting too many requests. Preview models have lower limits than stable ones; stay on a stable Flash model for demos.
 
 ### Try saying
 
@@ -89,8 +96,8 @@ Speech recognition needs Chrome (Android or desktop) and a network connection; F
 
 ```
 server.js                  Express: static files + /api/state + /api/status + /api/assistant/* + JSON persistence
-lib/assistant.js           AI command router: prompt, reply schema, validation, execution, conversation memory
-lib/claude.js              the only file that talks to Claude (structured outputs, key from env)
+lib/assistant.js           AI command router: prompt, function declarations, validation, execution, conversation memory
+lib/gemini.js              the only file that talks to Gemini (function calling, key from env)
 lib/time.js                local wall time ↔ instants, short labels ("2:30 PM", "Tomorrow, 9:00 AM")
 public/
   control.html / device.html / index.html

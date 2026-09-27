@@ -11,10 +11,10 @@
  * whole state whenever something changes. Last write wins — simple and reliable.
  *
  * Voice/AI: POST /api/assistant/command takes a transcript (or typed text).
- * lib/assistant.js asks Claude for structured actions, validates them, runs them
- * through public/js/actions.js and saves via applyState(). The device applies
- * the returned state immediately; the Control Centre sees it on its next poll.
- * The Anthropic API key never leaves the server.
+ * lib/assistant.js asks Gemini (function calling) for actions, validates them,
+ * runs them through public/js/actions.js and saves via applyState(). The device
+ * applies the returned state immediately; the Control Centre sees it on its next
+ * poll. The Gemini API key never leaves the server.
  */
 import './lib/env.js'; // loads a local .env first (optional)
 import express from 'express';
@@ -25,7 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeState, DEFAULT_STATE } from './public/js/state.js';
 import { handleCommand, ASSISTANT_NAME } from './lib/assistant.js';
-import { isConfigured, isMock, getModel } from './lib/claude.js';
+import { isConfigured, isMock, getModel, PROVIDER } from './lib/gemini.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -106,7 +106,7 @@ app.get('/api/status', (req, res) => {
 
 // ------------------------------------------------------------------ assistant
 app.get('/api/assistant/status', (req, res) => {
-  noStore(res).json({ ok: true, name: ASSISTANT_NAME, configured: isConfigured(), mock: isMock(), model: isMock() ? 'mock' : getModel() });
+  noStore(res).json({ ok: true, name: ASSISTANT_NAME, configured: isConfigured(), mock: isMock(), provider: isMock() ? 'mock' : PROVIDER, model: isMock() ? 'mock' : getModel() });
 });
 
 app.post('/api/assistant/command', async (req, res, next) => {
@@ -149,6 +149,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`[attn]   Control Centre  http://localhost:${PORT}/control`);
   console.log(`[attn]   Device          http://localhost:${PORT}/device`);
   for (const ip of lan) console.log(`[attn]   Phone on same Wi-Fi  http://${ip}:${PORT}/device`);
-  const mode = isMock() ? 'MOCK mode (ATTN_ASSISTANT_MOCK=1)' : isConfigured() ? `ready · ${getModel()}` : 'not configured — set ANTHROPIC_API_KEY';
+  const mode = isMock() ? 'MOCK mode (ATTN_ASSISTANT_MOCK=1)' : isConfigured() ? `ready · ${getModel()}` : 'not configured — set GEMINI_API_KEY';
   console.log(`[attn] assistant "${ASSISTANT_NAME}": ${mode}`);
 });
