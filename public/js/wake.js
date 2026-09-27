@@ -26,15 +26,24 @@ export function wakePattern(name) {
   return new RegExp(`^\\s*(?:${PREFIX}[\\s,]+)?(?:${alt})\\b[\\s,.!?:;\\-–—]*`, 'i');
 }
 
-/** @returns {{ woke: boolean, command: string }} */
-export function splitWake(text, name = 'Andrew') {
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.strict] For punctuated transcripts (OpenAI): a bare name without "hey/ok"
+ *   only wakes when it is the whole utterance or is followed by punctuation ("Andrew, remind me"),
+ *   so "Andrew said he'll call" stays ambient. Chrome transcripts have no punctuation: keep it off there.
+ * @returns {{ woke: boolean, command: string }}
+ */
+export function splitWake(text, name = 'Andrew', { strict = false } = {}) {
   const raw = String(text || '').trim();
   const m = wakePattern(name).exec(raw);
   if (!m) return { woke: false, command: raw };
   const heard = m[0];
+  const hasPrefix = new RegExp(`^\\s*${PREFIX}`, 'i').test(heard);
   // "android" alone is too easy to say by accident; require the greeting prefix for that alias
-  if (/android/i.test(heard) && !new RegExp(`^\\s*${PREFIX}`, 'i').test(heard)) return { woke: false, command: raw };
-  return { woke: true, command: raw.slice(heard.length).trim() };
+  if (/android/i.test(heard) && !hasPrefix) return { woke: false, command: raw };
+  const command = raw.slice(heard.length).trim();
+  if (strict && !hasPrefix && command && !/[,.!?:;]/.test(heard)) return { woke: false, command: raw };
+  return { woke: true, command };
 }
 
 /** Server-side convenience: the command without any wake phrase (never empty when the input was not). */

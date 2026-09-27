@@ -41,7 +41,7 @@ No WebSockets, no database. Polling is plenty at this size.
 Production voice is **OpenAI Realtime over WebRTC** (`VOICE_PROVIDER=openai`, the default):
 
 1. On the first visit tap **Enable Andrew** once: the browser asks for the microphone, the page fetches a short-lived client secret from `POST /api/realtime/token` (the permanent `OPENAI_API_KEY` never leaves the server), and a WebRTC session opens with Andrew's instructions, voice and tools baked in.
-2. The session stays connected while the page is visible. OpenAI's semantic turn detection listens; you speak naturally. "Hey Andrew" is treated as an address, never as the request; a command in the same sentence runs straight away, and follow-ups such as "Actually make that noon" or "Five" need no wake phrase because the conversation context lives in the session.
+2. The session stays connected while the page is visible. OpenAI's turn detection hears and transcribes every turn but never answers on its own (create_response is off): the device reads each transcript and only forwards turns that start with "Hey Andrew" (or "Andrew,", "OK Andrew"), so room talk changes nothing, not even the screen. A command in the same sentence runs straight away; a bare "Hey Andrew" opens a nine-second listening window. After Andrew answers, a nine-second follow-up window (twelve after a question) accepts "Actually make that noon" or "Five" without the wake phrase; then he goes passive again. Ignored turns are deleted from the session so they never colour his context.
 3. When the model decides on an action it calls one of the tools built from the real registry (`public/js/actions.js`). The device posts the call to `POST /api/realtime/tool`, which validates it (times in your timezone), runs the shared mutation, saves the state, and returns the result (with item ids) as `function_call_output`. Only then does Andrew speak the confirmation, in OpenAI's voice.
 4. The face states come from real events: speech start → listening, speech stop → processing, tool calls → processing, audio playback start → speaking, playback end → success with the changed cards highlighted. Interruptions are handled by the session (barge-in).
 5. If the connection drops the device reconnects with backoff; if the page is hidden the session stops and resumes when it is visible again.
@@ -59,7 +59,7 @@ Tools exposed: `add_item`, `update_item`, `remove_item`, `set_module_visibility`
 | `OPENAI_REALTIME_MODEL` | no | Default `gpt-realtime-2.1`. |
 | `OPENAI_REALTIME_VOICE` | no | Default `cedar`; `marin` is the other natural option. |
 | `OPENAI_REALTIME_VAD` | no | `semantic` (default, eagerness low) or `server` (700 ms silence) if the phone cuts you off. |
-| `OPENAI_REALTIME_TRANSCRIBE` | no | Input transcription model for logs and the subtle on-screen transcript; `off` disables. |
+| `OPENAI_REALTIME_TRANSCRIBE` | no | Input transcription model (default `gpt-4o-mini-transcribe`); the wake gate reads it, so it is always on. |
 
 **On Render:** Dashboard → the `attn` service → **Environment** → add `OPENAI_API_KEY` (value = your key) and `VOICE_PROVIDER` = `openai` → *Save Changes*. Render restarts the service. `GET /api/assistant/status` shows `realtime.configured: true` once it is picked up.
 

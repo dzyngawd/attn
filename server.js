@@ -176,8 +176,9 @@ app.get('/device', page('device.html'));
 
 app.use(express.static(PUBLIC_DIR, {
   setHeaders(res, filePath) {
-    // Never let the browser hold on to the shell or the service worker across deploys.
-    if (/\.(html)$|service-worker\.js$|manifest\.json$/.test(filePath)) res.set('Cache-Control', 'no-cache');
+    // Every asset revalidates on each load (ETag → 304 when unchanged), so a deploy is never
+    // stuck behind a stale cached script on the phone; the service worker keeps offline copies.
+    res.set('Cache-Control', /\.(png|svg|woff2?)$/.test(filePath) ? 'public, max-age=3600, must-revalidate' : 'no-cache');
   },
 }));
 

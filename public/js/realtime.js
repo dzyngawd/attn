@@ -6,7 +6,15 @@
  *   OpenAI audio ◀── function_call_output + response.create ◀──────────────────────────┘
  *
  * One tap on "Enable Andrew" (microphone permission) starts a persistent session
- * that stays connected while the page is visible. No Chrome SpeechRecognition,
+ * that stays connected while the page is visible.
+ *
+ * WAKE GATE: OpenAI's VAD detects and transcribes every turn but never answers on
+ * its own (create_response is off). The device reads each completed transcript:
+ * in PASSIVE mode only an utterance that starts with "Hey Andrew" (wake.js)
+ * goes through — the screen does not even change for ambient speech; in ACTIVE
+ * mode (just woken, answering a question, or the short follow-up window after a
+ * reply) the next utterance is the command. Only then is response.create sent,
+ * so no tool can run for room talk. Ignored turns are deleted from the session. No Chrome SpeechRecognition,
  * no SpeechSynthesis, no Gemini on this path. The UI states come from REAL
  * events: speech_started → listening, speech_stopped → processing, function
  * call → processing, output_audio_buffer.started → speaking (actual playback),
@@ -16,6 +24,7 @@
  */
 import { api } from './api.js';
 import { normalizeState } from './state.js';
+import { splitWake } from './wake.js';
 
 const OPENAI_CALLS_URL = 'https://api.openai.com/v1/realtime/calls';
 const MIC_TIMEOUT_MS = 20000;
@@ -25,6 +34,10 @@ const SUCCESS_LINGER_MS = 2400;
 const ERROR_LINGER_MS = 4000;
 const INSTRUCTIONS_REFRESH_MS = 5 * 60 * 1000;
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 15000, 15000, 15000];
+const ACTIVE_WINDOW_MS = 9000;      // after a bare "Hey Andrew": how long we wait for the command
+const FOLLOW_UP_WINDOW_MS = 9000;   // after Andrew answers: corrections need no wake phrase
+const CLARIFY_WINDOW_MS = 12000;    // after Andrew asks a question
+const TRANSCRIPT_WAIT_MS = 8000;    // speech stopped but no transcript yet → give up on that turn
 
 const log = (...args) => console.log('[Realtime]', ...args);
 const timeContext = () => ({ currentTime: new Date().toISOString(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: navigator.language });
@@ -47,6 +60,10 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   let replyText = '';
   let userText = '';
   let speaking = false;
+  let assistantMode = 'passive'; // passive | active — the wake gate
+  let activeTimer = null;
+  let transcriptTimer = null;
+  let askedQuestion = false;
   const events = []; // debug ring buffer
   const audioEl = document.createElement('audio');
   audioEl.autoplay = true;
@@ -203,6 +220,62 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     }, INSTRUCTIONS_REFRESH_MS);
   }
 
+  // ================================================================ wake gate (passive / active)
+  function setMode(mode, reason) {
+    if (assistantMode === mode) return;
+    assistantMode = mode;
+    if (mode === 'active') console.log('[Andrew] active' + (reason ? ' — ' + reason : ''));
+    else console.log('[Andrew] returned to passive' + (reason ? ' — ' + reason : ''));
+  }
+
+  /** Stay active for a while; when nothing arrives, go back to passive and the normal screen. */
+  function openActiveWindow(ms, reason) {
+    setMode('active', reason);
+    clearTimeout(activeTimer);
+    activeTimer = setTimeout(() => {
+      if (status === 'processing' || status === 'speaking') { openActiveWindow(ms, 'still busy'); return; }
+      askedQuestion = false;
+      setMode('passive', 'window expired');
+      if (status !== 'idle') set('idle');
+    }, ms);
+  }
+
+  /** A turn was meant for Andrew: ask the model to respond (tools allowed). */
+  function respondTo(transcript) {
+    clearTimeout(activeTimer);
+    clearTimeout(transcriptTimer);
+    askedQuestion = false;
+    setMode('active', 'command');
+    userText = transcript;
+    set('processing', { transcript });
+    armWatchdog(PROCESSING_WATCHDOG_MS);
+    console.log('[Andrew] response.create');
+    send({ type: 'response.create' });
+  }
+
+  /** Every completed turn passes through here; only addressed speech reaches the model. */
+  function gateTranscript(transcript, itemId) {
+    const text = (transcript || '').trim();
+    if (!text) return;
+    log('transcript:', JSON.stringify(text));
+    const { woke, command } = splitWake(text, name, { strict: true });
+    if (assistantMode === 'passive') {
+      if (!woke) {
+        console.log('[Wake] ignored ambient transcript');
+        if (itemId) send({ type: 'conversation.item.delete', item_id: itemId }); // keep Andrew's context clean
+        return;
+      }
+      console.log('[Wake] detected:', JSON.stringify(text.slice(0, text.length - command.length).trim()));
+      if (!command) { openActiveWindow(ACTIVE_WINDOW_MS, 'wake phrase only'); set('listening'); return; }
+      console.log('[Wake] extracted command:', JSON.stringify(command));
+      respondTo(text);
+      return;
+    }
+    // active: follow-up, correction or clarification answer; a wake phrase is optional
+    if (woke && !command) { openActiveWindow(askedQuestion ? CLARIFY_WINDOW_MS : ACTIVE_WINDOW_MS, 'wake phrase again'); set('listening'); return; }
+    respondTo(text);
+  }
+
   // ================================================================ events → UI + tools
   function handleEvent(ev) {
     if (debug) { events.push({ t: Date.now(), type: ev.type, ev }); if (events.length > 200) events.shift(); }
@@ -211,24 +284,30 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
       case 'session.updated':
         break;
       case 'input_audio_buffer.speech_started':
+        if (assistantMode !== 'active' && status === 'idle') break; // ambient speech: the screen stays as it is
         log('speech started');
         clearTimeout(idleTimer);
+        clearTimeout(activeTimer); // the window pauses while the user is talking
         userText = '';
-        set('listening');
+        set('listening', { text: askedQuestion ? replyText : '' });
         break;
       case 'input_audio_buffer.speech_stopped':
+        if (assistantMode !== 'active' && status === 'idle') break;
         log('speech stopped');
         set('processing', { transcript: userText });
-        armWatchdog(PROCESSING_WATCHDOG_MS);
+        clearTimeout(transcriptTimer);
+        transcriptTimer = setTimeout(() => { if (status === 'processing' && !speaking) { log('no transcript for that turn'); set(assistantMode === 'active' ? 'listening' : 'idle'); if (assistantMode === 'active') openActiveWindow(ACTIVE_WINDOW_MS, 'turn had no transcript'); } }, TRANSCRIPT_WAIT_MS);
         break;
       case 'conversation.item.input_audio_transcription.delta':
-        userText += ev.delta || '';
-        if (status === 'listening') device.setAssistantState('listening', { transcript: userText });
+        if (assistantMode === 'active' && status === 'listening') { userText += ev.delta || ''; device.setAssistantState('listening', { transcript: userText, text: askedQuestion ? replyText : '' }); }
         break;
       case 'conversation.item.input_audio_transcription.completed':
-        userText = (ev.transcript || userText).trim();
-        log('heard:', userText);
-        if (status === 'processing') device.setAssistantState('processing', { transcript: userText });
+        clearTimeout(transcriptTimer);
+        gateTranscript(ev.transcript, ev.item_id);
+        break;
+      case 'conversation.item.input_audio_transcription.failed':
+        log('transcription failed:', ev.error?.message || '');
+        if (status === 'processing' && !speaking) set(assistantMode === 'active' ? 'listening' : 'idle');
         break;
       case 'response.created':
         replyText = '';
@@ -314,9 +393,21 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     send({ type: 'response.create' }); // now Andrew can confirm what actually happened
   }
 
-  /** Audio finished (or a silent turn ended): step back to the dashboard, show what changed. */
+  /** Audio finished (or a silent turn ended): step back to the dashboard, show what changed, keep listening for a follow-up. */
   function afterResponse() {
     clearTimeout(idleTimer);
+    askedQuestion = /\?\s*$/.test(replyText.trim());
+    if (askedQuestion) {
+      // a question: stay forward with it on the face and wait for the answer
+      pendingHighlights = { itemIds: [], modules: [] };
+      toolChanged = false;
+      set('clarifying', { text: replyText });
+      openActiveWindow(CLARIFY_WINDOW_MS, 'clarification pending');
+      console.log('[Andrew] follow-up window opened (clarification)');
+      return;
+    }
+    openActiveWindow(FOLLOW_UP_WINDOW_MS, 'reply finished');
+    console.log('[Andrew] follow-up window opened');
     if (toolChanged) {
       toolChanged = false;
       const highlights = pendingHighlights;
@@ -343,7 +434,10 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   function showError(message) {
     clearWatchdog();
     clearTimeout(idleTimer);
+    clearTimeout(transcriptTimer);
     toolChanged = false;
+    askedQuestion = false;
+    setMode('passive', 'error');
     set('error', { text: message });
     idleTimer = setTimeout(() => { if (status === 'error') set('idle'); }, ERROR_LINGER_MS);
   }
@@ -382,7 +476,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   device.on('talk', () => { if (!connected && !connecting) enable(); });
   device.on('faceTap', (state) => {
     if (state === 'speaking') { send({ type: 'response.cancel' }); send({ type: 'output_audio_buffer.clear' }); }
-    else if (state === 'processing' || state === 'listening') { send({ type: 'response.cancel' }); clearWatchdog(); set('idle'); }
+    else if (state === 'processing' || state === 'listening' || state === 'clarifying') { send({ type: 'response.cancel' }); clearWatchdog(); clearTimeout(activeTimer); askedQuestion = false; setMode('passive', 'tap'); set('idle'); }
     else if (state === 'error') set('idle');
   });
   /** Debug only: a typed message enters the same Realtime conversation (same tools, same session). */
@@ -391,11 +485,8 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     if (!t) return;
     if (!connected) { device.setSetup({ text: 'Not connected. Tap to connect.', action: `Enable ${name}` }); return; }
     log('typed (debug):', t);
-    userText = t;
-    set('processing', { transcript: t });
-    armWatchdog(PROCESSING_WATCHDOG_MS);
     send({ type: 'conversation.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: t }] } });
-    send({ type: 'response.create' });
+    respondTo(t);
   }
   device.on('submitText', submitText);
   device.setAssistantName(name);
@@ -406,6 +497,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     disconnect: () => { enabled = false; remember(false); stopSession('disabled'); },
     submitText,
     get status() { return status; },
+    get mode() { return assistantMode; },
     get connected() { return connected; },
     get events() { return events; },
     /** Debug only: feed a server event as if it came over the data channel. */
