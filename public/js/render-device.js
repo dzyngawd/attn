@@ -19,7 +19,9 @@
  *   dev.setAssistantState(state, { text, transcript, action })
  *   dev.setExpression('auto' | 'neutral' | 'happy' | 'puzzled' | 'surprised')      // the small dashboard face
  *   dev.setHighlights({ itemIds, modules })                                          // pulse the cards it changed
- *   dev.setTypeBox(open) · dev.setAssistantName(name) · dev.on('talk' | 'faceTap' | 'submitText', fn)
+ *   dev.setSetup({ text, action, subtle } | null)                                    // one-time permission pill
+ *   dev.setTypeBox(open) · dev.setAssistantName(name) · dev.on('talk' | 'faceTap' | 'submitText' | 'enable', fn)
+ *   The typed command box only exists with { debug: true } (/device?debug=1).
  *
  * Rendering rules:
  *   - text changes update in place (no flash, no rebuild)
@@ -90,8 +92,8 @@ const SKELETON = `
     <button class="dv-typebox-send" type="submit" aria-label="Send">${SEND_SVG}</button>
   </form>
   <div class="dv-bar">
-    <button class="dv-talk" type="button"><span class="dv-talk-icon">${MIC_SVG}</span><span class="dv-talk-label">Talk to attn</span></button>
-    <button class="dv-type-toggle" type="button" aria-label="Type instead">${KEYBOARD_SVG}</button>
+    <button class="dv-setup" type="button" hidden><span class="dv-setup-icon">${MIC_SVG}</span><span class="dv-setup-text"></span></button>
+    <button class="dv-type-toggle" type="button" aria-label="Type instead" hidden>${KEYBOARD_SVG}</button>
     <button class="dv-install" type="button" hidden>Install</button>
   </div>
 </div>
@@ -234,9 +236,10 @@ function fillModule(el, id, mod) {
   return 0;
 }
 
-export function createDeviceRenderer(root, { preview = false } = {}) {
+export function createDeviceRenderer(root, { preview = false, debug = false } = {}) {
   root.classList.add('attn-device');
   root.classList.toggle('is-preview', preview);
+  root.classList.toggle('is-debug', debug);
   root.innerHTML = SKELETON;
   const q = (sel) => root.querySelector(sel);
   const els = {
@@ -246,7 +249,7 @@ export function createDeviceRenderer(root, { preview = false } = {}) {
     install: q('.dv-install'),
     facemode: q('.dv-facemode'), bigface: q('.dv-bigface'), fmWho: q('.dv-facemode-who'), fmLine: q('.dv-facemode-line'), fmSub: q('.dv-facemode-sub'), fmAction: q('.dv-facemode-action'), fmHint: q('.dv-facemode-hint'),
     typebox: q('.dv-typebox'), typeInput: q('.dv-typebox-input'), typeToggle: q('.dv-type-toggle'),
-    talk: q('.dv-talk'), talkLabel: q('.dv-talk-label'),
+    setup: q('.dv-setup'), setupText: q('.dv-setup-text'),
   };
   let firstRender = true;
   let baseExpression = 'neutral';   // what the face does when nobody is talking
@@ -254,7 +257,7 @@ export function createDeviceRenderer(root, { preview = false } = {}) {
   let reactTimer = null;
   let installHandler = null;
   let highlightTimer = null;
-  const handlers = { talk: [], faceTap: [], submitText: [] };
+  const handlers = { talk: [], faceTap: [], submitText: [], enable: [] };
   let assistantState = 'idle';
   let hideTimer = null;
   const emit = (event, ...args) => handlers[event].forEach((fn) => fn(...args));
@@ -370,15 +373,24 @@ export function createDeviceRenderer(root, { preview = false } = {}) {
 
   function setAssistantName(name) {
     setText(els.fmWho, name);
-    setText(els.talkLabel, `Talk to ${name}`);
     els.typeInput.placeholder = `Ask ${name}…`;
+  }
+
+  /** One-time browser requirements (microphone permission, speech unlock). null hides the pill. */
+  function setSetup(setup) {
+    if (!setup) { els.setup.hidden = true; return; }
+    setText(els.setupText, setup.action ? `${setup.text} · ${setup.action}` : setup.text);
+    els.setup.classList.toggle('is-subtle', Boolean(setup.subtle));
+    els.setup.disabled = !setup.action;
+    els.setup.hidden = false;
   }
 
   function on(event, fn) { handlers[event]?.push(fn); return () => { handlers[event] = handlers[event].filter((f) => f !== fn); }; }
 
   if (!preview) {
-    els.talk.addEventListener('click', () => emit('talk'));
+    els.setup.addEventListener('click', () => emit('enable'));
     els.face.addEventListener('click', () => emit('talk'));
+    if (debug) els.typeToggle.hidden = false;
     els.facemode.addEventListener('click', (e) => { if (e.target !== els.fmAction) emit('faceTap', assistantState, false); });
     els.fmAction.addEventListener('click', () => emit('faceTap', assistantState, true));
     els.typeToggle.addEventListener('click', () => setTypeBox(els.typebox.hidden));
@@ -386,5 +398,5 @@ export function createDeviceRenderer(root, { preview = false } = {}) {
     els.typeInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') setTypeBox(false); });
   }
 
-  return { root, update, setClock, setConnection, setInstall, setAssistantState, setExpression, setHighlights, setTypeBox, setAssistantName, on, get assistantState() { return assistantState; } };
+  return { root, update, setClock, setConnection, setInstall, setAssistantState, setExpression, setHighlights, setTypeBox, setAssistantName, setSetup, on, get assistantState() { return assistantState; } };
 }

@@ -38,15 +38,15 @@ No WebSockets, no database. Polling is plenty at this size.
 
 ## Talk to attn (voice + AI)
 
-Tap the face or the **Talk to Andrew** pill on `/device`, speak, and attn:
+Leave `/device` open and say **"Hey Andrew, …"**. attn:
 
-1. captures speech in the browser (Web Speech API, tap-to-talk, never always-on),
+1. keeps a foreground speech-recognition loop running (Web Speech API) and looks for the wake phrase locally; nothing is sent, spoken or changed until it hears "Hey Andrew" (also "Andrew", "OK Andrew"). A bare "Hey Andrew" makes him listen for about nine seconds; a command in the same sentence runs straight away,
 2. POSTs the transcript to `/api/assistant/command` with the current time, timezone and locale,
 3. asks Gemini which of the whitelisted **functions** to call (the action registry plus `clarify` and `respond`), never free-form parsing,
 4. validates every action, runs the whitelisted ones through `public/js/actions.js` (the same functions the Control Centre uses), saves through the normal persistence path,
 5. sends the real results back to Gemini for one short spoken sentence (with a deterministic fallback that never hides a failure), applies the new state on the device immediately, pulses the cards it touched, and speaks (SpeechSynthesis).
 
-The keyboard button opens a typed command box that goes through the exact same pipeline (also handy for debugging). `lib/assistant.js` holds the prompt, the reply schema, validation and a ten-minute conversation memory per device, enough for "What time today?" → "Five." and "Actually make that 3:30."
+After a reply, corrections such as "Actually make that noon" or answers to a question ("Five") need no wake phrase. The microphone is off while Andrew speaks so he cannot hear himself, recognition restarts itself whenever Chrome ends it, and it pauses while the page is hidden. The first visit needs one tap on **Enable Andrew** (microphone permission and speech unlock); after that it is hands-free while the page stays open. `/device?debug=1` adds a typed command box that uses the exact same pipeline, plus `window.attnDebug.simulate("Hey Andrew, …")` in the console. `lib/assistant.js` holds the prompt, the reply schema, validation and a ten-minute conversation memory per device, enough for "What time today?" → "Five." and "Actually make that 3:30."
 
 **What the assistant can do** (`ASSISTANT_ACTIONS` in `public/js/actions.js`): add an item to Pay attention to / Upcoming / Important email (with a resolved time), update or remove an item, show or hide a module, turn Focus mode on or off with a label and optional time block, write the Quick note, and answer questions about what is on the device.
 

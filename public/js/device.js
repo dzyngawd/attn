@@ -5,8 +5,9 @@
  * when the server's `revision` changes. Connection problems show a calm
  * "Reconnecting…" pill (never a browser error) and recover automatically.
  *
- * Voice: see assistant.js — tap the face or the Talk pill; typed commands via
- * the keyboard button. Both call POST /api/assistant/command.
+ * Voice: see assistant.js — Andrew listens for "Hey Andrew" while the page is
+ * open (after a one-time microphone permission). /device?debug=1 adds a typed
+ * command box that uses the same POST /api/assistant/command pipeline.
  */
 import { api } from './api.js';
 import { normalizeState } from './state.js';
@@ -16,7 +17,9 @@ import { createAssistant } from './assistant.js';
 const POLL_MS = 1500;
 const CACHE_KEY = 'attn.device.state';
 
-const device = createDeviceRenderer(document.getElementById('device'));
+// /device?debug=1 (or #debug) keeps a typed command box and a console handle for development
+const DEBUG = /[?&#]debug(=1)?\b/.test(location.search + location.hash);
+const device = createDeviceRenderer(document.getElementById('device'), { debug: DEBUG });
 let lastRevision = -1;
 let failures = 0;
 let status = '';
@@ -83,8 +86,9 @@ if ('serviceWorker' in navigator) {
 
 // ---- the assistant (voice + typed commands). The name comes from the server (ASSISTANT_NAME).
 api.assistantStatus()
-  .then((s) => createAssistant({ device, name: s.name || 'attn' }))
-  .catch(() => createAssistant({ device, name: 'attn' }));
+  .then((s) => createAssistant({ device, name: s.name || 'Andrew', debug: DEBUG }))
+  .catch(() => createAssistant({ device, name: 'Andrew', debug: DEBUG }))
+  .then((assistant) => { if (DEBUG) { window.attnDebug = { device, assistant, simulate: (t) => assistant.simulateTranscript(t) }; console.log('[Andrew] debug mode: window.attnDebug.simulate("Hey Andrew, …")'); } });
 
 // ---- keep the screen awake while attn is showing (no-op where unsupported)
 async function keepAwake() {

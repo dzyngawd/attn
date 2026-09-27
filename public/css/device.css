@@ -247,24 +247,29 @@
 .dv-facemode-hint:empty { display: none; }
 .is-typing .dv-facemode-hint { display: none; }
 
-/* ---- bottom bar: talk pill, keyboard, install (dashboard only) ---- */
+/* ---- bottom bar: one-time setup pill, install; keyboard only in debug mode ---- */
 .dv-bar { display: flex; align-items: center; justify-content: center; gap: 8px; flex: none; margin-top: auto; padding-top: 6px; }
-.dv-talk {
-  display: inline-flex; align-items: center; gap: 8px; border: 0; cursor: pointer;
-  border-radius: var(--r-pill); padding: 0 18px 0 12px; height: 46px;
+.dv-setup {
+  display: inline-flex; align-items: center; gap: 8px; border: 0; cursor: pointer; max-width: 100%;
+  border-radius: var(--r-pill); padding: 0 16px 0 10px; height: 44px;
   background: var(--surface-priority); color: var(--text-on-dark);
-  font: 600 14px/1 var(--font-action); box-shadow: var(--shadow-widget-item);
+  font: 600 13px/1.2 var(--font-action); text-align: left; box-shadow: var(--shadow-widget-item);
   transition: transform var(--dur-feedback) var(--ease-out), background var(--dur-micro);
 }
-.dv-talk:active { transform: scale(.97); }
-.dv-talk-icon { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--attn-sky); color: #fff; }
-.dv-talk-icon svg { width: 15px; height: 15px; }
+.dv-setup:active { transform: scale(.97); }
+.dv-setup:disabled { cursor: default; opacity: .85; }
+.dv-setup[hidden] { display: none; }
+.dv-setup.is-subtle { background: rgba(16,16,18,.22); box-shadow: none; }
+.dv-setup-icon { width: 26px; height: 26px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--attn-sky); color: #fff; }
+.dv-setup-icon svg { width: 15px; height: 15px; }
+.dv-setup-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .dv-type-toggle, .dv-install {
   height: 46px; border: 0; cursor: pointer; border-radius: var(--r-pill);
   background: rgba(16,16,18,.22); color: #fff; font: 600 13px/1 var(--font-action);
   transition: transform var(--dur-feedback) var(--ease-out), background var(--dur-micro);
 }
 .dv-type-toggle { width: 46px; display: grid; place-items: center; }
+.dv-type-toggle[hidden] { display: none; }
 .dv-type-toggle svg { width: 20px; height: 20px; }
 .dv-type-toggle:active, .dv-install:active { transform: scale(.96); }
 .is-typing .dv-type-toggle { background: #fff; color: var(--attn-ink); }
