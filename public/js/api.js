@@ -13,6 +13,7 @@ const TIMEOUT_MS = 4000;
 async function request(url, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeout ?? TIMEOUT_MS);
+  options.signal?.addEventListener('abort', () => controller.abort(), { once: true });
   try {
     const res = await fetch(url, { cache: 'no-store', ...options, signal: controller.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -31,4 +32,13 @@ export const api = {
     body: JSON.stringify(state),
   }),
   getStatus: () => request('/api/status'),
+  /** Voice/text command → { ok, type, spokenResponse, results, state?, ... } (see lib/assistant.js). */
+  command: (payload, signal) => request('/api/assistant/command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    timeout: 30000,
+    signal,
+  }),
+  assistantStatus: () => request('/api/assistant/status'),
 };

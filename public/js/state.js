@@ -96,9 +96,12 @@ export function newId() {
   return 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-export function createItem({ title = '', subtitle = '', type = 'manual' } = {}) {
-  return { id: newId(), title, subtitle, type: oneOf(type, ITEM_TYPES, 'manual') };
+/** `at` is an optional ISO instant (set by the assistant); `subtitle` stays the human label. */
+export function createItem({ title = '', subtitle = '', type = 'manual', at = null } = {}) {
+  return { id: newId(), title, subtitle, type: oneOf(type, ITEM_TYPES, 'manual'), at: isoOrNull(at) };
 }
+
+const isoOrNull = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null);
 
 function normalizeItem(raw) {
   if (typeof raw === 'string') raw = { title: raw };
@@ -108,6 +111,7 @@ function normalizeItem(raw) {
     title: str(raw.title, '', LIMITS.title),
     subtitle: str(raw.subtitle, '', LIMITS.subtitle),
     type: oneOf(raw.type, ITEM_TYPES, 'manual'),
+    at: isoOrNull(raw.at),
   };
 }
 

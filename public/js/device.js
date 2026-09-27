@@ -5,12 +5,13 @@
  * when the server's `revision` changes. Connection problems show a calm
  * "Reconnecting…" pill (never a browser error) and recover automatically.
  *
- * FUTURE (voice phase): microphone capture + speech-to-text start here; the
- * result is POSTed to the server and comes back through the same poll.
+ * Voice: see assistant.js — tap the face or the Talk pill; typed commands via
+ * the keyboard button. Both call POST /api/assistant/command.
  */
 import { api } from './api.js';
 import { normalizeState } from './state.js';
 import { createDeviceRenderer } from './render-device.js';
+import { createAssistant } from './assistant.js';
 
 const POLL_MS = 1500;
 const CACHE_KEY = 'attn.device.state';
@@ -79,6 +80,11 @@ window.addEventListener('appinstalled', () => device.setInstall(false));
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/service-worker.js').catch(() => { /* not fatal */ });
 }
+
+// ---- the assistant (voice + typed commands). The name comes from the server (ASSISTANT_NAME).
+api.assistantStatus()
+  .then((s) => createAssistant({ device, name: s.name || 'attn' }))
+  .catch(() => createAssistant({ device, name: 'attn' }));
 
 // ---- keep the screen awake while attn is showing (no-op where unsupported)
 async function keepAwake() {

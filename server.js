@@ -10,10 +10,13 @@
  * The device polls GET /api/state every ~1.5s. The Control Centre POSTs the
  * whole state whenever something changes. Last write wins — simple and reliable.
  *
- * FUTURE (voice phase): add e.g. POST /api/voice that turns a transcript into a
- * predefined function, calls applyState() with the result, and the device will
- * pick it up on its next poll. Nothing else needs to change.
+ * Voice/AI: POST /api/assistant/command takes a transcript (or typed text).
+ * lib/assistant.js asks Claude for structured actions, validates them, runs them
+ * through public/js/actions.js and saves via applyState(). The device applies
+ * the returned state immediately; the Control Centre sees it on its next poll.
+ * The Anthropic API key never leaves the server.
  */
+import './lib/env.js'; // loads a local .env first (optional)
 import express from 'express';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -21,6 +24,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeState, DEFAULT_STATE } from './public/js/state.js';
+import { handleCommand, ASSISTANT_NAME } from './lib/assistant.js';
+import { isConfigured, isMock, getModel } from './lib/claude.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -99,6 +104,20 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// ------------------------------------------------------------------ assistant
+app.get('/api/assistant/status', (req, res) => {
+  noStore(res).json({ ok: true, name: ASSISTANT_NAME, configured: isConfigured(), mock: isMock(), model: isMock() ? 'mock' : getModel() });
+});
+
+app.post('/api/assistant/command', async (req, res, next) => {
+  try {
+    const { status, body } = await handleCommand(req.body || {}, { getState: () => state, applyState });
+    noStore(res).status(status).json(body);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ------------------------------------------------------------------- frontend
 const page = (file) => (req, res) => res.set('Cache-Control', 'no-cache').sendFile(path.join(PUBLIC_DIR, file));
 app.get('/', page('index.html'));
@@ -130,4 +149,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`[attn]   Control Centre  http://localhost:${PORT}/control`);
   console.log(`[attn]   Device          http://localhost:${PORT}/device`);
   for (const ip of lan) console.log(`[attn]   Phone on same Wi-Fi  http://${ip}:${PORT}/device`);
+  const mode = isMock() ? 'MOCK mode (ATTN_ASSISTANT_MOCK=1)' : isConfigured() ? `ready · ${getModel()}` : 'not configured — set ANTHROPIC_API_KEY';
+  console.log(`[attn] assistant "${ASSISTANT_NAME}": ${mode}`);
 });

@@ -12,7 +12,8 @@
  * automatically, so a demo never has to start from scratch.
  */
 import { api } from './api.js';
-import { normalizeState, DEFAULT_STATE, MODULE_META, SOURCE_META, SOURCE_IDS, ITEM_TYPES, LIMITS, createItem } from './state.js';
+import { normalizeState, DEFAULT_STATE, MODULE_META, SOURCE_META, SOURCE_IDS, ITEM_TYPES, LIMITS } from './state.js';
+import { addItem, removeItem, setModuleVisibility, moveModule, connectSource as connectSourceAction, disconnectSource } from './actions.js';
 import { TILES, tileSvg } from './icons.js';
 import { LOGO_SVG } from './brand.js';
 import { createDeviceRenderer } from './render-device.js';
@@ -191,6 +192,8 @@ els.modules.addEventListener('input', (e) => {
   const path = e.target.dataset.path;
   if (!path) return;
   setPath(state, path, e.target.value);
+  const edited = path.match(/^modules\.(\w+)\.items\.(\d+)\.subtitle$/);
+  if (edited) state.modules[edited[1]].items[Number(edited[2])].at = null; // a typed time wins over the assistant's timestamp
   const m = path.match(/^modules\.(\w+)\.title$/);
   if (m) $(`.module[data-module="${m[1]}"] .module-title`, els.modules).textContent = state.modules[m[1]].title || MODULE_META[m[1]].label;
   const mod = path.match(/^modules\.(\w+)\./)?.[1];
@@ -201,7 +204,7 @@ els.modules.addEventListener('input', (e) => {
 els.modules.addEventListener('change', (e) => {
   if (!e.target.matches('[data-action="toggle-module"]')) return;
   const id = e.target.dataset.module;
-  state.modules[id].enabled = e.target.checked;
+  setModuleVisibility(state, { module: id, enabled: e.target.checked });
   $(`.module[data-module="${id}"]`, els.modules).classList.toggle('is-on', e.target.checked);
   updateHint(id);
   touch();
@@ -213,28 +216,23 @@ document.addEventListener('click', (e) => {
   const { action, module: id, source, index, dir } = btn.dataset;
   if (action === 'connect-source') connectSource(source);
   else if (action === 'disconnect-source') {
-    state.sources[source].connected = false;
+    disconnectSource(state, source);
     renderSources();
     touch();
     showToast(`${SOURCE_META[source].name} disconnected`);
   } else if (action === 'add-item') {
-    const mod = state.modules[id];
-    if (mod.items.length >= LIMITS.items) { showToast(`Up to ${LIMITS.items} items per module`); return; }
-    mod.items.push(createItem({ type: MODULE_META[id].type }));
+    const added = addItem(state, { module: id });
+    if (!added.ok) { showToast(`Up to ${LIMITS.items} items per module`); return; }
     renderModules();
-    $(`.module[data-module="${id}"] .item-row[data-index="${mod.items.length - 1}"] .item-title`, els.modules)?.focus();
+    $(`.module[data-module="${id}"] .item-row[data-index="${state.modules[id].items.length - 1}"] .item-title`, els.modules)?.focus();
     touch();
   } else if (action === 'remove-item') {
-    state.modules[id].items.splice(Number(index), 1);
+    removeItem(state, { module: id, index: Number(index) });
     renderModules();
     updateHint(id);
     touch();
   } else if (action === 'move-module') {
-    const order = state.moduleOrder;
-    const from = order.indexOf(id);
-    const to = from + Number(dir);
-    if (to < 0 || to >= order.length) return;
-    [order[from], order[to]] = [order[to], order[from]];
+    if (!moveModule(state, { module: id, direction: Number(dir) }).ok) return;
     renderModules();
     touch();
   }
@@ -242,15 +240,7 @@ document.addEventListener('click', (e) => {
 
 function connectSource(id) {
   const meta = SOURCE_META[id];
-  state.sources[id].connected = true;
-  let seeded = 0;
-  if (meta.seeds) {
-    const mod = state.modules[meta.seeds.module];
-    if (mod.items.every((it) => !it.title.trim())) {
-      mod.items = meta.seeds.items.map(createItem);
-      seeded = mod.items.length;
-    }
-  }
+  const { seeded } = connectSourceAction(state, id);
   renderSources();
   if (seeded) renderModules();
   touch();
