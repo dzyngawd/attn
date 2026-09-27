@@ -106,7 +106,7 @@ app.get('/api/status', (req, res) => {
 
 // ------------------------------------------------------------------ assistant
 app.get('/api/assistant/status', (req, res) => {
-  noStore(res).json({ ok: true, name: ASSISTANT_NAME, configured: isConfigured(), mock: isMock(), provider: isMock() ? 'mock' : PROVIDER, model: isMock() ? 'mock' : getModel() });
+  noStore(res).json({ ok: true, name: ASSISTANT_NAME, configured: isConfigured(), mock: isMock(), provider: isMock() ? 'mock' : PROVIDER, model: isMock() ? 'mock' : getModel(), commit: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null, node: process.version });
 });
 
 app.post('/api/assistant/command', async (req, res, next) => {
