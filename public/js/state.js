@@ -19,9 +19,19 @@
 export const STATE_VERSION = 1;
 
 /** Small limits keep the state tiny and the device readable. */
-export const LIMITS = { items: 8, title: 60, subtitle: 60, moduleTitle: 40, note: 240, name: 24 };
+export const LIMITS = { items: 8, title: 60, subtitle: 60, moduleTitle: 40, note: 240, name: 24, completed: 200 };
 
-export const THEMES = ['sky'];
+/** Visual themes. Tokens live in public/css/tokens.css under [data-theme]; both surfaces read device.theme. */
+export const THEME_META = {
+  sky:   { label: 'Sky',   hint: 'The original airy blue' },
+  lime:  { label: 'Lime',  hint: 'Fresh lemon-lime' },
+  blush: { label: 'Blush', hint: 'Soft, dreamy pink' },
+  sun:   { label: 'Sun',   hint: 'Warm, optimistic yellow' },
+};
+export const THEMES = Object.keys(THEME_META);
+
+/** How an item was marked done: a swipe on the device, Andrew's voice, or the Control Centre. */
+export const COMPLETION_METHODS = ['swipe', 'voice', 'control'];
 
 /** Item types map to a tile glyph + colour (see icons.js / tokens.css). */
 export const ITEM_TYPES = ['calendar', 'mail', 'task', 'focus', 'note', 'manual'];
@@ -74,6 +84,8 @@ export const DEFAULT_STATE = {
     manual: { connected: true },
   },
   moduleOrder: ['attention', 'calendar', 'mail', 'focus', 'note'],
+  /** Everything ever marked done, newest first (see actions.js completeItem). */
+  completed: [],
   modules: {
     attention: { enabled: true, title: 'Pay attention to', items: [
       { id: 'seed-1', title: 'Design review', subtitle: '2:30 PM', type: 'calendar' },
@@ -98,7 +110,7 @@ export function newId() {
 
 /** `at` is an optional ISO instant (set by the assistant); `subtitle` stays the human label. */
 export function createItem({ title = '', subtitle = '', type = 'manual', at = null, spokenReminder = false } = {}) {
-  return { id: newId(), title, subtitle, type: oneOf(type, ITEM_TYPES, 'manual'), at: isoOrNull(at), spokenReminder: Boolean(spokenReminder), reminderTriggered: false };
+  return { id: newId(), title, subtitle, type: oneOf(type, ITEM_TYPES, 'manual'), at: isoOrNull(at), spokenReminder: Boolean(spokenReminder), reminderTriggered: false, createdAt: new Date().toISOString() };
 }
 
 const isoOrNull = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null);
@@ -114,6 +126,28 @@ function normalizeItem(raw) {
     at: isoOrNull(raw.at),
     spokenReminder: Boolean(raw.spokenReminder), // Andrew speaks it when `at` arrives (device open)
     reminderTriggered: Boolean(raw.reminderTriggered),
+    createdAt: isoOrNull(raw.createdAt),
+  };
+}
+
+/** A completed record keeps everything useful about the item plus when/how it was finished. */
+function normalizeCompleted(raw) {
+  if (!isObj(raw)) return null;
+  const id = str(raw.id, '', 40);
+  const completedAt = isoOrNull(raw.completedAt);
+  if (!id || !completedAt) return null;
+  return {
+    id,
+    title: str(raw.title, '', LIMITS.title),
+    subtitle: str(raw.subtitle, '', LIMITS.subtitle),
+    type: oneOf(raw.type, ITEM_TYPES, 'manual'),
+    module: MODULE_IDS.includes(raw.module) ? raw.module : 'attention',
+    moduleLabel: str(raw.moduleLabel, '', LIMITS.moduleTitle),
+    source: str(raw.source, '', 40),
+    at: isoOrNull(raw.at),
+    createdAt: isoOrNull(raw.createdAt),
+    completedAt,
+    completionMethod: oneOf(raw.completionMethod, COMPLETION_METHODS, 'control'),
   };
 }
 
@@ -133,6 +167,7 @@ export function normalizeState(input) {
     },
     sources: {},
     moduleOrder: [],
+    completed: [],
     modules: {},
   };
 
@@ -162,6 +197,13 @@ export function normalizeState(input) {
 
   const requested = (Array.isArray(src.moduleOrder) ? src.moduleOrder : []).filter((id) => MODULE_IDS.includes(id));
   out.moduleOrder = [...new Set([...requested, ...MODULE_IDS])];
+
+  const seen = new Set();
+  out.completed = (Array.isArray(src.completed) ? src.completed : [])
+    .map(normalizeCompleted)
+    .filter((c) => c && !seen.has(c.id) && seen.add(c.id))
+    .sort((a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt))
+    .slice(0, LIMITS.completed);
   return out;
 }
 

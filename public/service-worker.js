@@ -8,11 +8,11 @@
  *     opens the device (which then shows "Reconnecting…").
  * Bump VERSION when you want every installed device to drop its old shell.
  */
-const VERSION = 'attn-shell-v6';
+const VERSION = 'attn-shell-v7';
 const SHELL = [
-  '/', '/control', '/device',
+  '/', '/control', '/control/completed', '/device',
   '/css/tokens.css', '/css/shared.css', '/css/device.css', '/css/control.css',
-  '/js/api.js', '/js/state.js', '/js/actions.js', '/js/wake.js', '/js/icons.js', '/js/brand.js', '/js/render-device.js', '/js/device.js', '/js/realtime.js', '/js/reminders.js', '/js/focus-player.js', '/js/focus-tracks.js', '/js/assistant.js', '/js/control.js',
+  '/js/api.js', '/js/state.js', '/js/actions.js', '/js/wake.js', '/js/icons.js', '/js/brand.js', '/js/render-device.js', '/js/device.js', '/js/realtime.js', '/js/reminders.js', '/js/focus-player.js', '/js/focus-tracks.js', '/js/assistant.js', '/js/control.js', '/js/completed.js', '/js/theme-picker.js',
   '/assets/attn-logo.svg', '/manifest.json',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png', '/icons/icon-180.png',
 ];

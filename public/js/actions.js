@@ -10,7 +10,7 @@
  * only ever names one of these with parameters; the server validates and runs
  * it here. The AI never touches state JSON directly.
  */
-import { MODULE_META, MODULE_IDS, ITEM_TYPES, LIMITS, SOURCE_META, createItem } from './state.js';
+import { MODULE_META, MODULE_IDS, ITEM_TYPES, LIMITS, SOURCE_META, THEMES, COMPLETION_METHODS, createItem } from './state.js';
 
 export const LIST_MODULES = MODULE_IDS.filter((id) => MODULE_META[id].kind === 'list');
 
@@ -54,6 +54,37 @@ export function updateItem(state, { itemId, title, subtitle, type, at, module } 
   return { ok: true, message: `Updated "${item.title}"${item.subtitle ? ` to ${item.subtitle}` : ''}.`, itemId: item.id, module: target };
 }
 
+/**
+ * Mark an item DONE: it leaves its list and is archived in state.completed with
+ * when and how it was finished. Every completion path (a swipe on the device,
+ * Andrew, the Control Centre) comes through here. removeItem() is the true delete.
+ */
+export function completeItem(state, { itemId, method = 'control', module, index } = {}) {
+  const found = itemId
+    ? findItem(state, itemId)
+    : (LIST_MODULES.includes(module) && state.modules[module].items[index] ? { module, index, item: state.modules[module].items[index] } : null);
+  if (!found) return { ok: false, message: "I couldn't find that item any more." };
+  const { item } = found;
+  state.modules[found.module].items.splice(found.index, 1);
+  const record = {
+    id: item.id,
+    title: item.title,
+    subtitle: item.subtitle,
+    type: item.type,
+    module: found.module,
+    moduleLabel: state.modules[found.module].title || MODULE_META[found.module].label,
+    source: item.type,
+    at: item.at || null,
+    createdAt: item.createdAt || null,
+    completedAt: new Date().toISOString(),
+    completionMethod: COMPLETION_METHODS.includes(method) ? method : 'control',
+  };
+  if (!Array.isArray(state.completed)) state.completed = [];
+  state.completed = [record, ...state.completed.filter((c) => c.id !== record.id)].slice(0, LIMITS.completed);
+  return { ok: true, message: `Done: "${item.title}".`, itemId: item.id, module: found.module, completed: record };
+}
+
+/** True deletion: the item is gone and does not appear under Completed. */
 export function removeItem(state, { itemId, module, index } = {}) {
   const found = itemId
     ? findItem(state, itemId)
@@ -61,6 +92,12 @@ export function removeItem(state, { itemId, module, index } = {}) {
   if (!found) return { ok: false, message: "I couldn't find that item any more." };
   state.modules[found.module].items.splice(found.index, 1);
   return { ok: true, message: `Cleared "${found.item.title}".`, itemId: found.item.id, module: found.module };
+}
+
+export function setTheme(state, { theme } = {}) {
+  if (!THEMES.includes(theme)) return { ok: false, message: 'Unknown theme.' };
+  state.device.theme = theme;
+  return { ok: true, message: `Theme: ${theme}.` };
 }
 
 export function setModuleVisibility(state, { module, enabled } = {}) {
@@ -180,8 +217,13 @@ export const ASSISTANT_ACTIONS = {
     params: { itemId: 'id of an existing item', title: 'optional new title', at: 'optional new local time YYYY-MM-DDTHH:mm', subtitle: 'optional new detail (only when no time)', module: 'optional: move to attention | calendar | mail' },
     run: updateItem,
   },
+  complete_item: {
+    description: 'Mark an item DONE by id — when the user says it is done, finished, handled, reviewed or sorted. The item leaves the device and is kept under Completed in the Control Centre.',
+    params: { itemId: 'id of an existing item' },
+    run: completeItem,
+  },
   remove_item: {
-    description: 'Remove an item by id — when the user says it is done, reviewed, handled, or should be cleared/deleted.',
+    description: 'Delete an item by id, for good — only when the user explicitly wants it removed, cleared or deleted rather than done (nothing is archived).',
     params: { itemId: 'id of an existing item' },
     run: removeItem,
   },

@@ -1,39 +1,44 @@
 /**
  * attn — Control Centre.
  *
- * "This is where I decide what attn knows about and what appears on my device."
+ * "This is where I decide what attn shows and what it knows about."
  *
  * Flow:  edit → local state → live preview (instant) → debounced POST /api/state
- *        → "Synced just now".  GET /api/status every few seconds shows whether
- *        the phone is polling, and adopts changes made from another window.
+ *        → quiet "Saved" line.  GET /api/status every few seconds adopts changes
+ *        made elsewhere (the phone completing a task, Andrew adding one).
+ *
+ * The theme picker (top right) writes device.theme into the same shared state,
+ * so the Control Centre, the preview and the physical device all change together.
  *
  * Resilience: the last saved state is also kept in localStorage. If the server
  * ever comes back empty (fresh deploy on an ephemeral host) it is restored
  * automatically, so a demo never has to start from scratch.
  */
 import { api } from './api.js';
-import { normalizeState, DEFAULT_STATE, MODULE_META, SOURCE_META, SOURCE_IDS, ITEM_TYPES, LIMITS } from './state.js';
-import { addItem, removeItem, setModuleVisibility, moveModule, connectSource as connectSourceAction, disconnectSource } from './actions.js';
+import { normalizeState, DEFAULT_STATE, MODULE_META, SOURCE_META, SOURCE_IDS, ITEM_TYPES, LIMITS, THEMES } from './state.js';
+import { addItem, removeItem, completeItem, setModuleVisibility, setTheme, moveModule, connectSource as connectSourceAction, disconnectSource } from './actions.js';
 import { TILES, tileSvg } from './icons.js';
 import { LOGO_SVG } from './brand.js';
 import { createDeviceRenderer } from './render-device.js';
+import { mountThemePicker } from './theme-picker.js';
 
 const SAVE_DEBOUNCE_MS = 350;
 const STATUS_POLL_MS = 3000;
 const BACKUP_KEY = 'attn.control.backup';
+const PREVIEW_W = 780; // the preview is the Galaxy A15 landscape viewport, scaled to fit
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const els = {
   boot: $('#boot'), app: $('#app'),
   sources: $('#sources'), modules: $('#modules'),
-  sync: $('#sync-status'), device: $('#device-status'), toast: $('#toast'),
+  sync: $('#sync-status'), toast: $('#toast'), completedCount: $('#completed-count'),
   previewFrame: $('#preview-frame'), previewScaler: $('#preview-scaler'), previewDevice: $('#preview-device'),
 };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const icon = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
-const ICON = { up: icon('m6 15 6-6 6 6'), down: icon('m6 9 6 6 6-6'), cross: icon('M6 6l12 12M18 6 6 18'), plus: icon('M12 5v14M5 12h14') };
+const ICON = { up: icon('m6 15 6-6 6 6'), down: icon('m6 9 6 6 6-6'), cross: icon('M6 6l12 12M18 6 6 18'), plus: icon('M12 5v14M5 12h14'), check: icon('m5 12.5 4.5 4.5L19 7') };
 
 // ------------------------------------------------------------------ state
 let state = normalizeState(DEFAULT_STATE);
@@ -47,7 +52,20 @@ let toastTimer = null;
 const dirty = () => changes !== savedChanges;
 
 const preview = createDeviceRenderer(els.previewDevice, { preview: true });
-preview.setConnection('online', 'Connected');
+preview.setConnection('online');
+const themePicker = mountThemePicker($('#theme-picker'), {
+  onSelect(theme) {
+    if (!setTheme(state, { theme }).ok) return;
+    applyTheme(theme);
+    touch();
+  },
+});
+
+function applyTheme(theme) {
+  const t = THEMES.includes(theme) ? theme : 'sky';
+  document.documentElement.dataset.theme = t;
+  themePicker.set(t);
+}
 
 function setPath(obj, path, value) {
   const keys = path.split('.');
@@ -92,9 +110,15 @@ async function restoreBackupIfServerIsFresh() {
 
 // ------------------------------------------------------------------ rendering
 function renderAll() {
-  renderSources();
+  applyTheme(state.device.theme);
   renderModules();
+  renderSources();
+  renderCompletedCount();
   preview.update(state);
+}
+
+function renderCompletedCount() {
+  els.completedCount.textContent = String(state.completed.length);
 }
 
 function renderSources() {
@@ -120,7 +144,7 @@ function hintFor(id, mod) {
   if (!mod.enabled) return meta.hint;
   if (meta.kind === 'list') {
     const n = mod.items.filter((it) => it.title.trim()).length;
-    return n === 0 ? 'On · nothing to show yet' : `On · ${n} item${n === 1 ? '' : 's'}`;
+    return n === 0 ? 'On · nothing to show yet' : `On · ${n} item${n === 1 ? '' : 's'} on attn`;
   }
   if (meta.kind === 'focus') return `On · ${mod.subtitle.trim() || meta.hint}`;
   return mod.text.trim() ? 'On · showing your note' : 'On · nothing written yet';
@@ -131,15 +155,17 @@ function itemRow(id, it, i) {
     <input class="input item-title" data-path="modules.${id}.items.${i}.title" value="${esc(it.title)}" maxlength="${LIMITS.title}" placeholder="What is it?" aria-label="Item title">
     <input class="input item-sub" data-path="modules.${id}.items.${i}.subtitle" value="${esc(it.subtitle)}" maxlength="${LIMITS.subtitle}" placeholder="When or why" aria-label="Item detail">
     <select class="input select item-type" data-path="modules.${id}.items.${i}.type" aria-label="Item type">${ITEM_TYPES.map((t) => `<option value="${t}"${t === it.type ? ' selected' : ''}>${TILES[t].label}</option>`).join('')}</select>
-    <button class="icon-btn item-remove" type="button" data-action="remove-item" data-module="${id}" data-index="${i}" aria-label="Remove item">${ICON.cross}</button>
+    <button class="icon-btn item-done" type="button" data-action="complete-item" data-module="${id}" data-index="${i}" aria-label="Mark done" title="Mark done">${ICON.check}</button>
+    <button class="icon-btn item-remove" type="button" data-action="remove-item" data-module="${id}" data-index="${i}" aria-label="Delete item" title="Delete">${ICON.cross}</button>
   </div>`;
 }
 
 function editorFor(id, mod, meta) {
   const label = `<label class="field"><span class="field-label">Label on attn</span><input class="input" data-path="modules.${id}.title" value="${esc(mod.title)}" maxlength="${LIMITS.moduleTitle}" placeholder="${esc(meta.label)}"></label>`;
   if (meta.kind === 'list') {
+    const rows = mod.items.length ? mod.items.map((it, i) => itemRow(id, it, i)).join('') : '<div class="items-empty">Nothing here yet — add the first thing that needs attention.</div>';
     return `<div class="editor">${label}
-      <div class="field"><span class="field-label">Items</span><div class="items">${mod.items.map((it, i) => itemRow(id, it, i)).join('')}</div></div>
+      <div class="field"><span class="field-label">Items · ✓ marks one done, × deletes it</span><div class="items">${rows}</div></div>
       <div><button class="btn btn-light" type="button" data-action="add-item" data-module="${id}">${ICON.plus}Add item</button></div>
     </div>`;
   }
@@ -226,6 +252,13 @@ document.addEventListener('click', (e) => {
     renderModules();
     $(`.module[data-module="${id}"] .item-row[data-index="${state.modules[id].items.length - 1}"] .item-title`, els.modules)?.focus();
     touch();
+  } else if (action === 'complete-item') {
+    const r = completeItem(state, { module: id, index: Number(index), method: 'control' });
+    if (!r.ok) return;
+    renderModules();
+    renderCompletedCount();
+    touch();
+    showToast(r.completed.title.trim() ? `Done: “${r.completed.title}” · see Completed` : 'Marked done · see Completed');
   } else if (action === 'remove-item') {
     removeItem(state, { module: id, index: Number(index) });
     renderModules();
@@ -263,8 +296,10 @@ async function save() {
     const saved = normalizeState(await api.saveState(state));
     state.revision = saved.revision;
     state.updatedAt = saved.updatedAt;
+    state.completed = saved.completed; // the server may have merged completions from the device
     savedChanges = at;
     lastSyncedAt = Date.now();
+    renderCompletedCount();
     try { localStorage.setItem(BACKUP_KEY, JSON.stringify(state)); } catch { /* ignore */ }
     setSync('synced');
   } catch {
@@ -281,14 +316,18 @@ const isEditing = () => els.modules.contains(document.activeElement) && document
 async function pollStatus() {
   try {
     const s = await api.getStatus();
-    setDevice(s.device?.online ? 'online' : 'waiting');
     if (syncState === 'offline' && !dirty()) setSync('synced');
     if (!dirty() && !saving && s.revision > state.revision && !isEditing()) {
       const remote = normalizeState(await api.getState('control'));
-      if (!dirty() && !saving) { state = remote; renderAll(); showToast('Updated from another window'); }
+      if (!dirty() && !saving) {
+        const completedBefore = state.completed.length;
+        state = remote;
+        renderAll();
+        const newlyDone = state.completed.length - completedBefore;
+        showToast(newlyDone > 0 ? `Done on attn: “${state.completed[0].title}”` : 'Updated from attn');
+      }
     }
   } catch {
-    setDevice('unknown');
     if (!saving) setSync('offline');
   }
 }
@@ -306,17 +345,12 @@ function refreshSyncLabel() {
   else if (syncState === 'connecting') t.textContent = 'Connecting…';
   else {
     const s = lastSyncedAt ? Math.round((Date.now() - lastSyncedAt) / 1000) : 0;
-    t.textContent = s < 10 ? 'Synced just now' : s < 60 ? `Synced ${s}s ago` : `Synced ${Math.round(s / 60)} min ago`;
+    t.textContent = s < 10 ? 'Saved' : s < 60 ? `Saved ${s}s ago` : `Saved ${Math.round(s / 60)} min ago`;
   }
 }
 
-function setDevice(kind) {
-  els.device.dataset.state = kind;
-  $('.pill-text', els.device).textContent = { online: 'Device connected', waiting: 'Waiting for device', unknown: 'Device status unknown' }[kind];
-}
-
 function fitPreview() {
-  els.previewScaler.style.transform = `scale(${els.previewFrame.clientWidth / 360})`;
+  els.previewScaler.style.transform = `scale(${els.previewFrame.clientWidth / PREVIEW_W})`;
 }
 
 function showToast(text) {

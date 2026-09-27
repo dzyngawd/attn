@@ -95,6 +95,92 @@
   --ease-content: cubic-bezier(.3,1.08,.5,1);
   --ease-expressive: cubic-bezier(.34,1.22,.5,1);
   --ease-out: cubic-bezier(.2,.8,.2,1);
+
+  /* permanent colours: the same in every theme */
+  --ink: rgb(16,16,18);
+  --white: rgb(255,255,255);
+  --card-dark: rgb(22,22,24);
+  --danger: rgb(255,69,59);
+  --theme-transition: 600ms;
+}
+
+/* Registered so a theme change TRANSITIONS (gradients built from these interpolate) instead of flashing. */
+@property --theme-deep { syntax: '<color>'; inherits: true; initial-value: #17A6F3; }
+@property --theme-primary { syntax: '<color>'; inherits: true; initial-value: #25B4F5; }
+@property --theme-secondary { syntax: '<color>'; inherits: true; initial-value: #79D8EE; }
+@property --theme-soft { syntax: '<color>'; inherits: true; initial-value: #D4F0EB; }
+@property --theme-highlight { syntax: '<color>'; inherits: true; initial-value: #F5F6DF; }
+@property --theme-glow { syntax: '<color>'; inherits: true; initial-value: rgba(37,180,245,.30); }
+@property --theme-card-accent { syntax: '<color>'; inherits: true; initial-value: rgba(37,180,245,.28); }
+@property --theme-text { syntax: '<color>'; inherits: true; initial-value: #ffffff; }
+@property --theme-text-soft { syntax: '<color>'; inherits: true; initial-value: rgba(255,255,255,.86); }
+@property --theme-canvas-tint { syntax: '<color>'; inherits: true; initial-value: rgba(37,180,245,.10); }
+
+/* ================================================================ themes
+   Four airy palettes. device.theme in the shared state sets [data-theme] on
+   both the Control Centre and the Device; everything themed reads ONLY these
+   semantic tokens. Dark cards, white card text, the mascot's ink features and
+   the urgent red never change with the theme.
+     --theme-primary     the saturated top of the gradient / selected controls
+     --theme-secondary   the middle of the gradient
+     --theme-soft        the pale lower band
+     --theme-highlight   the near-white bottom edge
+     --theme-glow        translucent primary for halos and focus rings
+     --theme-card-accent translucent primary used as the dark card's rim
+     --theme-deep        a slightly deeper primary for the very top of the sky
+     --theme-text        text colour that stays readable ON the gradient
+                         (white on the darker skies, ink on the light ones) */
+:root, [data-theme="sky"] {
+  --theme-primary: #25B4F5;
+  --theme-secondary: #79D8EE;
+  --theme-soft: #D4F0EB;
+  --theme-highlight: #F5F6DF;
+  --theme-glow: rgba(37,180,245,.30);
+  --theme-card-accent: rgba(37,180,245,.28);
+  --theme-deep: #17A6F3;
+  --theme-text: rgb(255,255,255);
+  --theme-text-soft: rgba(255,255,255,.86);
+  --theme-shadow: rgba(0,60,120,.10);
+  --theme-canvas-tint: rgba(37,180,245,.10);
+}
+[data-theme="lime"] {
+  --theme-primary: #B7EA43;
+  --theme-secondary: #D9F58A;
+  --theme-soft: #EDF6C9;
+  --theme-highlight: #FFF9DF;
+  --theme-glow: rgba(183,234,67,.28);
+  --theme-card-accent: rgba(183,234,67,.32);
+  --theme-deep: #ACE335;
+  --theme-text: rgb(16,16,18);
+  --theme-text-soft: rgba(16,16,18,.78);
+  --theme-shadow: rgba(60,90,0,.10);
+  --theme-canvas-tint: rgba(183,234,67,.14);
+}
+[data-theme="blush"] {
+  --theme-primary: #FF83C5;
+  --theme-secondary: #F6B2D8;
+  --theme-soft: #FAD9E8;
+  --theme-highlight: #FFF2E4;
+  --theme-glow: rgba(255,131,197,.26);
+  --theme-card-accent: rgba(255,131,197,.30);
+  --theme-deep: #FB74BC;
+  --theme-text: rgb(255,255,255);
+  --theme-text-soft: rgba(255,255,255,.88);
+  --theme-shadow: rgba(120,20,70,.10);
+  --theme-canvas-tint: rgba(255,131,197,.12);
+}
+[data-theme="sun"] {
+  --theme-primary: #FFD54E;
+  --theme-secondary: #FFE58A;
+  --theme-soft: #F8EDB8;
+  --theme-highlight: #FFF8E5;
+  --theme-glow: rgba(255,213,78,.28);
+  --theme-card-accent: rgba(255,213,78,.34);
+  --theme-deep: #FFCE38;
+  --theme-text: rgb(16,10,0);
+  --theme-text-soft: rgba(16,10,0,.78);
+  --theme-shadow: rgba(120,80,0,.10);
+  --theme-canvas-tint: rgba(255,213,78,.14);
 }
 
 /* Tile colour by item type — used by both the device and the Control Centre. */

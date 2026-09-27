@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="sky">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -18,38 +18,46 @@
   <div id="boot" class="boot"><div class="orb"></div><span>Connecting to attn…</span></div>
 
   <div id="app" class="cc-layout" hidden>
-    <div class="cc-main">
-      <header class="cc-header">
+    <header class="cc-top">
+      <div class="cc-brand">
         <div class="cc-logo" id="logo"></div>
         <p class="cc-tagline">Choose what deserves your attention.</p>
-        <div class="cc-status">
-          <span class="pill" id="device-status" data-state="unknown" title="Open /device on your phone"><span class="pill-dot"></span><span class="pill-text">Waiting for device</span></span>
-          <span class="pill pill-quiet" id="sync-status" data-state="connecting"><span class="pill-text">Connecting…</span></span>
-        </div>
-      </header>
-
-      <section class="cc-section" aria-labelledby="h-sources">
-        <h2 id="h-sources">Your sources</h2>
-        <p class="cc-section-hint">What attn is allowed to read. Demo connections only for now — nothing leaves this page.</p>
-        <div id="sources" class="sources"></div>
-      </section>
-
-      <section class="cc-section" aria-labelledby="h-modules">
-        <h2 id="h-modules">Show on attn</h2>
-        <p class="cc-section-hint">Turn a module on to put it on the device, then edit what it says. Changes reach the phone in a second or two.</p>
-        <div id="modules" class="modules"></div>
-      </section>
-
-      <footer class="cc-foot">Open <code>/device</code> on your phone to see it live.</footer>
-    </div>
-
-    <aside class="cc-side">
-      <div class="preview">
-        <div class="preview-caption">Live preview</div>
-        <div class="phone"><div class="phone-screen" id="preview-frame"><div class="phone-scaler" id="preview-scaler"><div id="preview-device"></div></div></div></div>
-        <p class="preview-note">Rendered from the same state and code as the phone.</p>
       </div>
-    </aside>
+      <div class="cc-tools">
+        <div class="cc-tools-row">
+          <nav class="cc-nav" aria-label="Control Centre">
+            <a class="cc-nav-link is-active" href="/control" aria-current="page">Show on attn</a>
+            <a class="cc-nav-link" href="/control/completed">Completed <span class="cc-nav-count" id="completed-count">0</span></a>
+          </nav>
+          <div class="theme-picker" id="theme-picker" role="radiogroup" aria-label="attn theme"></div>
+        </div>
+        <span class="cc-sync" id="sync-status" data-state="connecting"><span class="pill-text">Connecting…</span></span>
+      </div>
+    </header>
+
+    <div class="cc-body">
+      <main class="cc-main">
+        <section class="cc-section" aria-labelledby="h-modules">
+          <div class="cc-section-head"><div><h2 id="h-modules">Show on attn</h2><p class="cc-section-hint">What your attn device shows right now. Turn a card on, edit what it says, and it reaches the phone in a second or two.</p></div></div>
+          <div id="modules" class="modules"></div>
+        </section>
+
+        <section class="cc-section" aria-labelledby="h-sources">
+          <div class="cc-section-head"><div><h2 id="h-sources">Your sources</h2><p class="cc-section-hint">What attn is allowed to read. Demo connections only for now — nothing leaves this page.</p></div></div>
+          <div id="sources" class="sources"></div>
+        </section>
+
+        <footer class="cc-foot">Open <code>/device</code> on the phone, sideways. Say “Hey Andrew…” to talk to it.</footer>
+      </main>
+
+      <aside class="cc-side">
+        <div class="preview">
+          <div class="preview-caption">Live on attn</div>
+          <div class="slab"><div class="slab-screen" id="preview-frame"><div class="slab-scaler" id="preview-scaler"><div id="preview-device"></div></div></div></div>
+          <p class="preview-note">Exactly what the phone shows, drawn from the same state and code.</p>
+        </div>
+      </aside>
+    </div>
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

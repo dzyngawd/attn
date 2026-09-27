@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en" data-theme="sky">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>attn — Completed</title>
+  <meta name="description" content="Everything you have crossed off on attn.">
+  <meta name="theme-color" content="#F0EFEA">
+  <link rel="icon" href="/icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Agbalumo&family=Inter+Tight:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/shared.css">
+  <link rel="stylesheet" href="/css/device.css">
+  <link rel="stylesheet" href="/css/control.css">
+</head>
+<body class="cc">
+  <div id="boot" class="boot"><div class="orb"></div><span>Connecting to attn…</span></div>
+
+  <div id="app" class="cc-layout" hidden>
+    <header class="cc-top">
+      <div class="cc-brand">
+        <div class="cc-logo" id="logo"></div>
+        <p class="cc-tagline">Everything you’ve crossed off.</p>
+      </div>
+      <div class="cc-tools">
+        <div class="cc-tools-row">
+          <nav class="cc-nav" aria-label="Control Centre">
+            <a class="cc-nav-link" href="/control">Show on attn</a>
+            <a class="cc-nav-link is-active" href="/control/completed" aria-current="page">Completed <span class="cc-nav-count" id="completed-count">0</span></a>
+          </nav>
+          <div class="theme-picker" id="theme-picker" role="radiogroup" aria-label="attn theme"></div>
+        </div>
+        <span class="cc-sync" id="sync-status" data-state="synced"><span class="pill-text"></span></span>
+      </div>
+    </header>
+
+    <main class="cc-main cc-main-narrow">
+      <section class="cc-section" aria-labelledby="h-completed">
+        <div class="cc-section-head"><div><h2 id="h-completed">Completed</h2><p class="cc-section-hint">Marked done with a swipe on the device, by Andrew, or from here. Most recent first.</p></div></div>
+        <div id="completed"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/js/completed.js"></script>
+</body>
+</html>

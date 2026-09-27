@@ -10,6 +10,8 @@ Control Centre (laptop)  →  shared state (one JSON object)  →  Device (phone
 
 Change something in the Control Centre and it appears on the phone within a second or two. Say "Hey Andrew, …" to the phone and Andrew (OpenAI Realtime, speech to speech) turns it into the same state changes and answers in his own voice. No real integrations yet.
 
+The device is a **landscape** screen (designed at 780 × 360 CSS px, the Galaxy A15 held sideways): clock, date and the attn face on the left, "Needs attn. (N)" with up to three dark cards on the right, never scrolling. Swipe a card right to mark it done; it lands under **Completed** in the Control Centre. Four themes (Sky, Lime, Blush, Sun) are picked top-right in the Control Centre and reach the phone live.
+
 ## Run it locally
 
 Needs Node 18+ (`node -v`).
@@ -46,7 +48,7 @@ Production voice is **OpenAI Realtime over WebRTC** (`VOICE_PROVIDER=openai`, th
 4. The face states come from real events: speech start → listening, speech stop → processing, tool calls → processing, audio playback start → speaking, playback end → success with the changed cards highlighted. Interruptions are handled by the session (barge-in).
 5. If the connection drops the device reconnects with backoff; if the page is hidden the session stops and resumes when it is visible again.
 
-Tools exposed: `add_item`, `update_item`, `remove_item`, `set_module_visibility`, `set_focus`, `set_note`, `schedule_reminder`, `start_focus_music`, `stop_focus_music`, `end_focus_mode`, plus read-only `query_attn_state` and `highlight_items`.
+Tools exposed: `add_item`, `update_item`, `complete_item` (done → Completed), `remove_item` (true delete), `set_module_visibility`, `set_focus`, `set_note`, `schedule_reminder`, `start_focus_music`, `stop_focus_music`, `end_focus_mode`, plus read-only `query_attn_state` and `highlight_items`.
 
 **Intentionally unsupported** (Andrew says so instead of pretending): sending or reading email, real calendars, audio other than the focus playlist, OS alarms/notifications, calls, browsing, long-term memory.
 
@@ -86,7 +88,7 @@ Tools exposed: `add_item`, `update_item`, `remove_item`, `set_module_visibility`
 - "Hey Andrew, remind me to catch my bus in five minutes." · "Hey Andrew, remind me in ten seconds to drink water." (test)
 - "Hey Andrew, I'm about to go into deep focus mode. Block all notifications." → "Do you want me to play some frequency music?" → "Yes." · "Hey Andrew, stop the music." · "Hey Andrew, end focus mode."
 - "Hey Andrew, give me an hour of focus starting at ten."
-- "Hey Andrew, hide the email things." · "Hey Andrew, put a note saying call Mum." · "Hey Andrew, I'm done with the design review."
+- "Hey Andrew, hide the email things." · "Hey Andrew, put a note saying call Mum." · "Hey Andrew, I'm done with the design review." (→ Completed)
 
 ### Browser notes
 
@@ -95,29 +97,32 @@ Needs a browser with WebRTC and microphone access (Chrome on Android is the targ
 ## Where state lives
 
 - **Runtime:** `data/state.json` (git-ignored). Written atomically on every save, loaded on boot.
-- **Shape + defaults:** `public/js/state.js`. Imported by the server *and* both frontends, so validation happens in one place. `normalizeState()` turns any malformed or partial input into a valid state. Items carry an optional `at` timestamp (set by the assistant) plus `spokenReminder` / `reminderTriggered` flags; `subtitle` stays the human label. The focus module carries `notificationsBlocked`, `musicPlaying`, `currentTrackId` and `startedAt`.
+- **Shape + defaults:** `public/js/state.js`. Imported by the server *and* both frontends, so validation happens in one place. `normalizeState()` turns any malformed or partial input into a valid state. Items carry an optional `at` timestamp (set by the assistant), `createdAt`, plus `spokenReminder` / `reminderTriggered` flags; `subtitle` stays the human label. The focus module carries `notificationsBlocked`, `musicPlaying`, `currentTrackId` and `startedAt`. `device.theme` is one of `sky | lime | blush | sun`.
+- **Completed:** `state.completed` (newest first, capped at 200) holds every item marked done: `{ id, title, subtitle, type, module, moduleLabel, source, at, createdAt, completedAt, completionMethod }` with `completionMethod` ∈ `swipe | voice | control`. `completeItem()` in actions.js is the one path (device swipe → `POST /api/items/complete`, Andrew → `complete_item`, Control Centre ✓ button); `removeItem()` stays a true delete. A stale `POST /api/state` can neither resurrect a completed item nor drop its record (the server reconciles).
 - **Mutations:** `public/js/actions.js` — every change, from the Control Centre or the assistant, goes through these functions.
 - **Ephemeral hosts:** if the server ever restarts empty (fresh deploy on Replit Autoscale / Render free), the Control Centre restores its localStorage backup automatically. Set `ATTN_STATE_FILE=/some/volume/state.json` on hosts with a persistent disk.
 
 ## Project layout
 
 ```
-server.js                  Express: static files + /api/state + /api/status + /api/assistant/* + /api/realtime/* + /api/reminders/triggered + JSON persistence
+server.js                  Express: static files + /api/state + /api/status + /api/items/complete + /api/assistant/* + /api/realtime/* + /api/reminders/triggered + JSON persistence
 lib/assistant.js           AI command router: prompt, function declarations, validation, execution, conversation memory
 lib/realtime.js            OpenAI Realtime bridge: client secrets, session config (instructions, voice, VAD, tools), tool execution
 lib/gemini.js              legacy provider (VOICE_PROVIDER=legacy only)
 lib/time.js                local wall time ↔ instants, short labels ("2:30 PM", "Tomorrow, 9:00 AM")
 public/
-  control.html / device.html / index.html
-  css/tokens.css           design tokens curated from design-system/ (colours, type, radii, motion)
+  control.html / completed.html / device.html / index.html
+  css/tokens.css           design tokens curated from design-system/ + the four theme palettes (--theme-*)
   css/shared.css           reset, buttons, switch, chips, orb, toast (Control Centre + landing)
-  css/control.css          Control Centre layout
-  css/device.css           the device: ambient gradient, face, cards, transitions
+  css/control.css          Control Centre + Completed layout, theme picker, landscape preview
+  css/device.css           the landscape device: ambient sky, face, cards, swipe, voice states, rotate screen
   js/state.js              shared state model + normalizeState()   ← single source of truth
   js/actions.js            shared mutations + the assistant action whitelist
   js/api.js                fetch wrapper with timeouts
-  js/render-device.js      the device renderer (used by /device AND the live preview)
-  js/device.js             device boot: polling, clock, PWA install, service worker, assistant
+  js/render-device.js      the device renderer (used by /device AND the live preview): one prioritised stack, swipe-to-complete, face
+  js/device.js             device boot: polling, clock, landscape lock + rotate screen, viewport logging, PWA install, service worker, assistant
+  js/completed.js          the Completed page (/control/completed): Today / Yesterday / Earlier
+  js/theme-picker.js       the four-swatch theme picker in the Control Centre header
   js/realtime.js           the production voice client: WebRTC session, real events → UI states, tool bridge, spoken reminders, focus audio
   js/reminders.js          one-timer scheduler for spoken reminders (marks on the server, then Andrew speaks)
   js/focus-player.js       the visible YouTube IFrame player for Deep Focus audio
@@ -153,7 +158,10 @@ edit code  →  git commit && git push  →  host redeploys  →  refresh / reop
 
 1. Open `https://<app>/device` in Chrome on the phone.
 2. Tap **Install attn** at the bottom of the screen (or Chrome menu ⋮ → *Add to Home screen* / *Install app*).
-3. Launch it from the home screen: it opens full-screen, portrait, straight into the device, and reconnects to the same backend.
+3. Launch it from the home screen: it opens full-screen, **landscape** (the app asks the OS to lock it; held upright it shows "Rotate attn"), straight into the device, and reconnects to the same backend.
+4. For a demo, pin the app (Settings → Security → Pin windows / App pinning) so the screen stays on attn.
+
+The device logs `[Viewport] load: W×H css px · dpr · orientation` to the console; on the A15 expect about 780 × 360 (landscape). If the phone reports something different, the layout adapts (it is measured in container units), but that is the number to tune against.
 
 ## What comes next
 

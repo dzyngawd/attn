@@ -1,61 +1,69 @@
 /**
- * attn — device renderer.
+ * attn — device renderer (landscape, one screen).
  *
  * Shared by the full-screen /device page and the Control Centre's live preview,
  * so both draw EXACTLY the same thing from the same state.
  *
  *   const dev = createDeviceRenderer(rootEl, { preview: false });
- *   dev.update(state);                         // reconcile modules + items by id
+ *   dev.update(state);                         // theme + one prioritised stack, reconciled by key
  *   dev.setClock(new Date());                  // time + date lines
- *   dev.setConnection('online', 'Connected');  // top-right pill
+ *   dev.setConnection('online', 'Connected');  // no visible badge any more (data-conn on the root, debug only)
  *   dev.setInstall(true, onClick);             // "Install" pill (device page only)
+ *   dev.setOrientation(portrait)               // "Rotate attn" screen while the phone is held upright
  *
- * Voice layer (device page only; hidden in the preview) — driven by assistant.js.
- * The device is a state machine: assistantState ∈ idle | listening | processing |
- * speaking | clarifying | success | error. Idle and success show the dashboard;
- * every other state brings the attn character forward as a full-screen face
- * (Figma mascot card: rounded-square eyes + small mouth; listening = slow
- * waveform mouth, speaking = fast waveform, puzzled = "?" bubble + glance).
+ * Layout (measured from the design reference at 780×360):
+ *   left  ≈ 51%  clock (Agbalumo) · date · the attn face, centred on one axis
+ *   right ≈ 49%  "Needs attn. (N)" · up to MAX_VISIBLE dark cards, never scrolling
+ * All enabled list modules feed ONE stack, ordered by urgency (timed items first,
+ * soonest first). Focus mode takes the first card while it is on; a Quick note the last.
+ * N counts every outstanding item even when only three are drawn.
+ *
+ * Swipe right on a card → the card follows the finger, a "Done" layer appears behind it,
+ * past the threshold it flies out and 'complete' is emitted with the item id. The state
+ * update that follows collapses the gap and the next item moves up.
+ *
+ * Voice layer (device page only; hidden in the preview) — driven by realtime.js.
+ * assistantState ∈ idle | listening | processing | speaking | clarifying | success | error.
+ * Idle and success show the dashboard; every other state brings the face forward on the same
+ * sky (reference frames 2–4): eyes + waveform mouth, ink on the gradient, subtle motion.
  *   dev.setAssistantState(state, { text, transcript, action })
- *   dev.setExpression('auto' | 'neutral' | 'happy' | 'puzzled' | 'surprised')      // the small dashboard face
- *   dev.setHighlights({ itemIds, modules })                                          // pulse the cards it changed
- *   dev.setSetup({ text, action, subtle } | null)                                    // one-time permission pill
- *   dev.setTypeBox(open) · dev.setAssistantName(name) · dev.on('talk' | 'faceTap' | 'submitText' | 'enable', fn)
- *   The typed command box only exists with { debug: true } (/device?debug=1).
- *
- * Rendering rules:
- *   - text changes update in place (no flash, no rebuild)
- *   - new modules/items animate in with a stagger; removed ones collapse out
- *   - reordering moves existing nodes instead of recreating them
- *   - at most MAX_VISIBLE_ITEMS per module, then "+N more"
+ *   dev.setExpression('auto' | 'neutral' | 'happy' | 'puzzled' | 'surprised')
+ *   dev.setHighlights({ itemIds, modules })
+ *   dev.setSetup({ text, action, subtle } | null)
+ *   dev.setTypeBox(open) · dev.setAssistantName(name)
+ *   dev.on('talk' | 'faceTap' | 'submitText' | 'enable' | 'update' | 'startAudio' | 'complete', fn)
  */
-import { MODULE_META } from './state.js';
+import { MODULE_META, THEMES } from './state.js';
 import { tileSvg } from './icons.js';
 import { LOGO_SVG } from './brand.js';
 
-const MAX_VISIBLE_ITEMS = 3;
-const LEAVE_MS = 400;        // a little above --dur-leave so the collapse finishes
-const REACT_MS = 2600;       // how long the face smiles after new content arrives
+const MAX_VISIBLE = 3;
+const LEAVE_MS = 420;
+const REACT_MS = 1400;       // how long the face reacts to new content
 const HIGHLIGHT_MS = 2600;
+const URGENT_WINDOW_MS = 12 * 60 * 60 * 1000;
+const SWIPE_MIN_PX = 70;     // never below this
+const SWIPE_RATIO = 0.28;    // …or 28% of the card width, whichever is larger
 
-// Exact geometry from the Figma "Display" frames (design-system/components/device/AttnFace.jsx, AttnOrb.jsx)
+// Exact geometry from the Figma "Display" frames (design-system/components/device/AttnFace.jsx):
+// blocky polygon eyes with a square highlight, mirrored; the mouth family from the mascot card.
 const EYE = 'M 10.485 0 L 80.384 5.483 L 90.869 16.45 L 90.869 87.734 L 80.384 100.071 L 15.145 94.588 L 0 82.25 L 0 12.338 L 10.485 0 Z';
 const HIGHLIGHT = '59.813,17.253 81.668,18.403 81.668,39.108 59.813,37.95';
 const BUBBLE = 'M 14.947 0 L 141.5 0 L 141.5 95.662 L 62.778 101.641 L 46.835 119.577 L 49.824 100.644 L 0 95.662 L 0 12.954 L 4.982 12.954 L 4.982 4.982 L 14.947 4.982 L 14.947 0 Z';
-// Sound-wave mouth from the mascot guideline (bar heights ×3 for the 360-unit face)
-const WAVE = [27, 51, 72, 84, 57, 30].map((h, i) => `<rect class="dv-wave-bar" x="${(123.7 + i * 20).toFixed(1)}" y="${(147 - h / 2).toFixed(1)}" width="12" height="${h}" rx="6" style="--d:${[-0.1, -0.3, -0.5, -0.2, -0.4, -0.6][i]}s"/>`).join('');
+// Sound-wave mouth (mascot guideline bar heights ×3), centred under the eyes
+const WAVE = [27, 51, 72, 84, 57, 30].map((h, i) => `<rect class="dv-wave-bar" x="${(123.7 + i * 20).toFixed(1)}" y="${(150 - h / 2).toFixed(1)}" width="12" height="${h}" rx="6" style="--d:${[-0.1, -0.3, -0.5, -0.2, -0.4, -0.6][i]}s"/>`).join('');
 
-const FACE_SVG = `
-<svg class="dv-face-svg" viewBox="-8 -8 376 180" aria-hidden="true">
-  <defs><linearGradient id="dvEyeG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgb(43,43,45)"/><stop offset="1" stop-color="rgb(37,37,39)"/></linearGradient></defs>
+export const faceSvg = (id) => `
+<svg class="dv-face-svg" viewBox="-8 -8 376 226" aria-hidden="true">
+  <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgb(43,43,45)"/><stop offset="1" stop-color="rgb(37,37,39)"/></linearGradient></defs>
   <g class="dv-face-float">
     <g class="dv-face-look">
-      <g class="dv-eye dv-eye-l"><path d="${EYE}" fill="url(#dvEyeG)"/><polygon points="${HIGHLIGHT}" fill="#fff"/></g>
-      <g transform="translate(359.451 0) scale(-1 1)"><g class="dv-eye dv-eye-r"><path d="${EYE}" fill="url(#dvEyeG)"/><polygon points="${HIGHLIGHT}" fill="#fff"/></g></g>
+      <g class="dv-eye dv-eye-l"><path d="${EYE}" fill="url(#${id})"/><polygon points="${HIGHLIGHT}" fill="#fff"/></g>
+      <g transform="translate(359.451 0) scale(-1 1)"><g class="dv-eye dv-eye-r"><path d="${EYE}" fill="url(#${id})"/><polygon points="${HIGHLIGHT}" fill="#fff"/></g></g>
     </g>
-    <rect class="dv-mouth dv-mouth-neutral" x="146.656" y="141.49" width="65.564" height="11.502" fill="rgb(39,39,41)"/>
-    <path class="dv-mouth dv-mouth-happy" d="M 143 110 Q 179.7 168 216.4 110" fill="none" stroke="rgb(39,39,41)" stroke-width="11.5" stroke-linecap="round"/>
-    <ellipse class="dv-mouth dv-mouth-surprised" cx="179.7" cy="139" rx="18" ry="15" fill="rgb(39,39,41)"/>
+    <rect class="dv-mouth dv-mouth-neutral" x="146.656" y="144.49" width="65.564" height="11.502" rx="5.75" fill="rgb(39,39,41)"/>
+    <path class="dv-mouth dv-mouth-happy" d="M 110 166 Q 179.7 234 249.4 166" fill="none" stroke="rgb(39,39,41)" stroke-width="20" stroke-linecap="round"/>
+    <ellipse class="dv-mouth dv-mouth-surprised" cx="179.7" cy="158" rx="19" ry="17" fill="rgb(39,39,41)"/>
     <g class="dv-mouth dv-mouth-wave" fill="rgb(39,39,41)">${WAVE}</g>
   </g>
   <g transform="translate(4 -104) scale(-1 1)"><g class="dv-bubble"><path d="${BUBBLE}" fill="rgb(228,227,224)"/><text class="dv-bubble-text" x="70" y="78" text-anchor="middle" transform="translate(141.5 0) scale(-1 1)">?</text></g></g>
@@ -64,52 +72,45 @@ const FACE_SVG = `
 const MIC_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
 const KEYBOARD_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg>';
 const SEND_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
+const CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg>';
+const ROTATE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M3 12a9 9 0 0 1 3-6.7M21 12a9 9 0 0 1-3 6.7"/><path d="m4.5 3.5 1.5 1.8-2 1.2M19.5 20.5 18 18.7l2-1.2"/></svg>';
 
 const SKELETON = `
 <div class="dv-bg" aria-hidden="true">
+  <div class="dv-sky"></div>
   <div class="dv-glow dv-glow-a"></div><div class="dv-glow dv-glow-b"></div><div class="dv-glow dv-glow-c"></div>
-  <div class="dv-vignette"></div>
+  <div class="dv-rim"></div>
 </div>
 <div class="dv-safe">
-  <header class="dv-top">
-    <span class="dv-logo">${LOGO_SVG}</span>
-    <div class="dv-conn" data-status="connecting"><span class="dv-conn-dot"></span><span class="dv-conn-text">Connecting to attn…</span></div>
-  </header>
-  <section class="dv-hero">
+  <section class="dv-left">
     <div class="dv-clock">
       <div class="dv-time"><span class="dv-time-digits">--:--</span><span class="dv-time-period"></span></div>
       <div class="dv-date">&nbsp;</div>
     </div>
-    <button class="dv-face" type="button" data-expression="neutral" aria-label="Talk to attn">${FACE_SVG}</button>
-  </section>
-  <main class="dv-stack"></main>
-  <div class="dv-empty" hidden>
-    <div class="dv-empty-title">You're all caught up.</div>
-    <div class="dv-empty-sub">Turn something on in the Control Centre and it shows up here.</div>
-  </div>
-  <form class="dv-typebox" hidden>
-    <input class="dv-typebox-input" type="text" autocomplete="off" enterkeyhint="send" maxlength="240" placeholder="Ask attn…" aria-label="Type a command">
-    <button class="dv-typebox-send" type="submit" aria-label="Send">${SEND_SVG}</button>
-  </form>
-  <div class="dv-bar">
-    <button class="dv-setup" type="button" hidden><span class="dv-setup-icon">${MIC_SVG}</span><span class="dv-setup-text"></span></button>
-    <button class="dv-type-toggle" type="button" aria-label="Type instead" hidden>${KEYBOARD_SVG}</button>
-    <button class="dv-install" type="button" hidden>Install</button>
-  </div>
-</div>
-<!-- the character comes forward: full-screen face for listening / processing / speaking / clarifying / error -->
-<div class="dv-facemode" hidden>
-  <div class="dv-facemode-glow" aria-hidden="true"></div>
-  <div class="dv-bigface" data-expression="neutral" aria-hidden="true">
-    <div class="dv-bigeyes"><span class="dv-bigeye dv-bigeye-l"></span><span class="dv-bigeye dv-bigeye-r"></span></div>
-    <div class="dv-bigmouth">
-      <span class="dv-bigmouth-dash"></span>
-      <span class="dv-bigmouth-wave"><b></b><b></b><b></b><b></b><b></b><b></b></span>
-      <span class="dv-bigmouth-o"></span>
-      <span class="dv-bigmouth-smile"></span>
+    <button class="dv-face" type="button" data-expression="happy" aria-label="Talk to attn">${faceSvg('dvEyeG')}</button>
+    <div class="dv-player" hidden><div class="dv-player-frame"></div><button class="dv-player-start" type="button" hidden>Start focus audio</button></div>
+    <div class="dv-bar">
+      <button class="dv-setup" type="button" hidden><span class="dv-setup-icon">${MIC_SVG}</span><span class="dv-setup-text"></span></button>
+      <button class="dv-type-toggle" type="button" aria-label="Type instead" hidden>${KEYBOARD_SVG}</button>
+      <button class="dv-install" type="button" hidden>Install attn</button>
     </div>
-    <div class="dv-bigbubble">?</div>
-  </div>
+  </section>
+  <section class="dv-right">
+    <h2 class="dv-heading"><span class="dv-heading-text">Needs attn.</span> <span class="dv-heading-count">(0)</span></h2>
+    <div class="dv-stack"></div>
+    <div class="dv-empty" hidden>
+      <div class="dv-empty-title">You're all caught up.</div>
+      <div class="dv-empty-sub">Anything new from the Control Centre or Andrew shows up here.</div>
+    </div>
+  </section>
+</div>
+<form class="dv-typebox" hidden>
+  <input class="dv-typebox-input" type="text" autocomplete="off" enterkeyhint="send" maxlength="240" placeholder="Ask attn…" aria-label="Type a command">
+  <button class="dv-typebox-send" type="submit" aria-label="Send">${SEND_SVG}</button>
+</form>
+<!-- the character comes forward on the same sky for listening / processing / speaking / clarifying / error -->
+<div class="dv-facemode" hidden>
+  <div class="dv-bigface" data-expression="neutral" aria-hidden="true">${faceSvg('dvEyeBig')}</div>
   <div class="dv-facemode-text">
     <div class="dv-facemode-who">attn</div>
     <div class="dv-facemode-line"></div>
@@ -117,6 +118,13 @@ const SKELETON = `
     <button class="dv-facemode-action" type="button" hidden></button>
   </div>
   <div class="dv-facemode-hint"></div>
+</div>
+<!-- held upright: attn is a landscape device -->
+<div class="dv-rotate" aria-hidden="true">
+  <div class="dv-rotate-face" data-expression="puzzled">${faceSvg('dvEyeRot')}</div>
+  <div class="dv-rotate-title"><span class="dv-rotate-icon">${ROTATE_SVG}</span>Rotate attn</div>
+  <div class="dv-rotate-sub">attn lives sideways. Turn the phone to landscape.</div>
+  <div class="dv-rotate-logo">${LOGO_SVG}</div>
 </div>`;
 
 const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
@@ -160,87 +168,143 @@ function leave(el) {
 
 function revive(el) {
   clearTimeout(el._leaveTimer);
-  el.classList.remove('is-leaving');
+  el.classList.remove('is-leaving', 'is-done');
   el.style.height = el.style.marginBottom = el.style.opacity = el.style.transform = '';
+  el.style.setProperty('--dx', '0px');
+  el.style.setProperty('--p', 0);
 }
 
-function createModule(id) {
-  const meta = MODULE_META[id];
-  const el = document.createElement('section');
-  el.className = 'dv-module';
-  el.dataset.module = id;
-  el.dataset.kind = meta.kind;
-  if (meta.kind === 'list') {
-    el.innerHTML = '<h2 class="dv-eyebrow"></h2><div class="dv-items"></div><div class="dv-more" hidden></div><div class="dv-placeholder" hidden>Nothing here yet</div>';
-  } else if (meta.kind === 'focus') {
-    el.innerHTML = `<article class="dv-card dv-card-focus"><div class="dv-tile" data-type="focus">${tileSvg('focus')}</div><div class="dv-card-text"><div class="dv-card-title"></div><div class="dv-card-sub"></div><div class="dv-card-meta" hidden></div></div><span class="dv-live" aria-hidden="true"></span></article><div class="dv-player" hidden><div class="dv-player-frame"></div><button class="dv-player-start" type="button" hidden>Start focus audio</button></div>`;
-  } else {
-    el.innerHTML = `<h2 class="dv-eyebrow"></h2><article class="dv-card dv-card-note"><div class="dv-tile" data-type="note">${tileSvg('note')}</div><div class="dv-card-text"><p class="dv-note-text"></p></div></article>`;
+// ---------------------------------------------------------------- the stack
+/**
+ * Everything the device could show, in priority order:
+ *   focus (while on) → list items (timed first, soonest first, then the user's order) → note.
+ * Returns { entries, total } where total counts the outstanding list items (the header N).
+ */
+export function stackEntries(state) {
+  const entries = [];
+  const items = [];
+  let position = 0;
+  for (const id of state.moduleOrder) {
+    const mod = state.modules[id];
+    const meta = MODULE_META[id];
+    if (!mod?.enabled) continue;
+    if (meta.kind === 'focus') entries.push({ key: 'focus', kind: 'focus', mod });
+    else if (meta.kind === 'list') for (const item of mod.items) if (item.title.trim()) items.push({ key: `item:${item.id}`, kind: 'item', item, module: id, position: position++ });
   }
-  return el;
+  const time = (e) => (e.item.at ? Date.parse(e.item.at) : Number.POSITIVE_INFINITY);
+  items.sort((a, b) => (time(a) - time(b)) || (a.position - b.position));
+  entries.push(...items);
+  const note = state.modules.note;
+  if (note?.enabled && note.text.trim()) entries.push({ key: 'note', kind: 'note', mod: note });
+  return { entries, total: items.length };
 }
 
-function createItemEl() {
+/** Attention items are always urgent (that is what the list is for); other items when due within 12 h. */
+function isUrgent(entry, now) {
+  if (entry.module === 'attention') return true;
+  if (!entry.item.at) return false;
+  const dt = Date.parse(entry.item.at) - now;
+  return dt < URGENT_WINDOW_MS;
+}
+
+function createCard(entry) {
   const el = document.createElement('article');
-  el.className = 'dv-item';
-  el.innerHTML = '<div class="dv-item-body"><div class="dv-tile"></div><div class="dv-item-text"><div class="dv-item-title"></div><div class="dv-item-sub"></div></div></div>';
+  el.className = `dv-card dv-card-${entry.kind}`;
+  el.dataset.key = entry.key;
+  if (entry.kind === 'item') {
+    el.dataset.id = entry.item.id;
+    el.innerHTML = `<div class="dv-done" aria-hidden="true"><span class="dv-done-check">${CHECK_SVG}</span><span class="dv-done-text">Done</span></div>
+      <div class="dv-card-body"><div class="dv-tile"></div><div class="dv-card-text"><div class="dv-card-title"></div><div class="dv-card-sub"></div></div></div>`;
+  } else if (entry.kind === 'focus') {
+    el.innerHTML = `<div class="dv-card-body"><div class="dv-tile" data-type="focus">${tileSvg('focus')}</div><div class="dv-card-text"><div class="dv-card-title"></div><div class="dv-card-sub"></div><div class="dv-card-meta" hidden></div></div><span class="dv-live" aria-hidden="true"></span></div>`;
+  } else {
+    el.innerHTML = `<div class="dv-card-body"><div class="dv-tile" data-type="note">${tileSvg('note')}</div><div class="dv-card-text"><div class="dv-card-title"></div><p class="dv-note-text"></p></div></div>`;
+  }
   return el;
 }
 
-function fillItem(el, item) {
-  const tile = el.querySelector('.dv-tile');
-  if (tile.dataset.type !== item.type) { tile.dataset.type = item.type; tile.innerHTML = tileSvg(item.type); }
-  setText(el.querySelector('.dv-item-title'), item.title);
-  const sub = el.querySelector('.dv-item-sub');
-  setText(sub, item.subtitle);
-  sub.hidden = !item.subtitle.trim();
-}
-
-/** Fill a module's DOM from its state. Returns how many NEW items appeared. */
-function fillModule(el, id, mod) {
-  const meta = MODULE_META[id];
-  if (meta.kind === 'list') {
-    setText(el.querySelector('.dv-eyebrow'), mod.title.trim() || meta.label);
-    const items = mod.items.filter((it) => it.title.trim());
-    const shown = items.slice(0, MAX_VISIBLE_ITEMS);
-    const wrap = el.querySelector('.dv-items');
-    let added = 0;
-    for (const itemEl of liveChildren(wrap)) if (!shown.some((it) => it.id === itemEl.dataset.id)) leave(itemEl);
-    const desired = shown.map((it, i) => {
-      let itemEl = findChild(wrap, 'id', it.id);
-      if (itemEl && itemEl.classList.contains('is-leaving')) revive(itemEl);
-      if (!itemEl) { itemEl = createItemEl(); itemEl.dataset.id = it.id; enter(itemEl, added++); }
-      itemEl.style.setProperty('--i', i);
-      fillItem(itemEl, it);
-      return itemEl;
-    });
-    order(wrap, desired);
-    const more = el.querySelector('.dv-more');
-    const extra = items.length - shown.length;
-    more.hidden = extra <= 0;
-    if (extra > 0) setText(more, `+${extra} more`);
-    el.querySelector('.dv-placeholder').hidden = items.length > 0;
-    return added;
+function fillCard(el, entry, now) {
+  if (entry.kind === 'item') {
+    const { item } = entry;
+    const tile = el.querySelector('.dv-tile');
+    if (tile.dataset.type !== item.type) { tile.dataset.type = item.type; tile.innerHTML = tileSvg(item.type); }
+    setText(el.querySelector('.dv-card-title'), item.title);
+    const sub = el.querySelector('.dv-card-sub');
+    setText(sub, item.subtitle);
+    sub.hidden = !item.subtitle.trim();
+    const urgent = isUrgent(entry, now);
+    el.dataset.urgent = urgent ? 'true' : 'false';
+    el.dataset.module = entry.module;
+    el.classList.toggle('is-reminder', Boolean(item.spokenReminder && !item.reminderTriggered));
+    return;
   }
-  if (meta.kind === 'focus') {
-    setText(el.querySelector('.dv-card-title'), mod.title.trim() || meta.label);
+  if (entry.kind === 'focus') {
+    const { mod } = entry;
+    setText(el.querySelector('.dv-card-title'), mod.title.trim() || MODULE_META.focus.label);
     const sub = el.querySelector('.dv-card-sub');
     setText(sub, mod.subtitle);
     sub.hidden = !mod.subtitle.trim();
-    // Deep Focus demo flags (nothing on the phone is really changed)
     const flags = [mod.notificationsBlocked ? 'Notifications blocked' : '', mod.musicPlaying ? 'Focus audio playing' : ''].filter(Boolean);
     const metaEl = el.querySelector('.dv-card-meta');
     setText(metaEl, flags.join(' · '));
     metaEl.hidden = flags.length === 0;
     el.classList.toggle('is-music', Boolean(mod.musicPlaying));
-    el.querySelector('.dv-player').hidden = !mod.musicPlaying;
-    return 0;
+    return;
   }
-  setText(el.querySelector('.dv-eyebrow'), mod.title.trim() || meta.label);
-  const text = el.querySelector('.dv-note-text');
-  setText(text, mod.text.trim() || 'Nothing written yet');
-  text.classList.toggle('is-placeholder', !mod.text.trim());
-  return 0;
+  setText(el.querySelector('.dv-card-title'), entry.mod.title.trim() || MODULE_META.note.label);
+  setText(el.querySelector('.dv-note-text'), entry.mod.text.trim());
+}
+
+// ---------------------------------------------------------------- swipe to complete
+function attachSwipe(el, onComplete) {
+  let pid = null;
+  let startX = 0;
+  let startY = 0;
+  let dx = 0;
+  let active = false;
+  let captured = false;
+  const threshold = () => Math.max(SWIPE_MIN_PX, el.offsetWidth * SWIPE_RATIO);
+  const reset = () => {
+    el.classList.remove('is-touching', 'is-swiping', 'is-past');
+    el.style.setProperty('--dx', '0px');
+    el.style.setProperty('--p', 0);
+  };
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || el.classList.contains('is-done') || el.classList.contains('is-leaving')) return;
+    pid = e.pointerId; startX = e.clientX; startY = e.clientY; dx = 0; active = true; captured = false;
+    el.classList.add('is-touching');
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!active || e.pointerId !== pid) return;
+    const mx = e.clientX - startX;
+    const my = e.clientY - startY;
+    if (!captured) {
+      if (Math.abs(mx) < 6 && Math.abs(my) < 6) return;           // a tap, not a swipe
+      if (Math.abs(my) > Math.abs(mx)) { active = false; el.classList.remove('is-touching'); return; } // vertical: ignore
+      captured = true;
+      try { el.setPointerCapture(pid); } catch { /* ignore */ }
+      el.classList.add('is-swiping');
+    }
+    dx = mx > 0 ? mx : mx * 0.25;                                   // rightwards only; left has resistance
+    const p = Math.min(1, Math.max(0, dx / threshold()));
+    el.style.setProperty('--dx', `${dx}px`);
+    el.style.setProperty('--p', p.toFixed(3));
+    el.classList.toggle('is-past', dx >= threshold());
+  });
+  const end = (e) => {
+    if (!active || e.pointerId !== pid) return;
+    active = false;
+    el.classList.remove('is-touching', 'is-swiping');
+    if (captured && dx >= threshold()) {
+      el.classList.add('is-done');
+      el.classList.remove('is-past');
+      el.style.setProperty('--dx', `${el.offsetWidth + 48}px`);
+      el.style.setProperty('--p', 1);
+      Promise.resolve(onComplete()).catch(() => { el.classList.remove('is-done'); reset(); });
+    } else reset();
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
 }
 
 export function createDeviceRenderer(root, { preview = false, debug = false } = {}) {
@@ -250,66 +314,83 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
   root.innerHTML = SKELETON;
   const q = (sel) => root.querySelector(sel);
   const els = {
-    stack: q('.dv-stack'), empty: q('.dv-empty'), face: q('.dv-face'),
-    conn: q('.dv-conn'), connText: q('.dv-conn-text'),
+    stack: q('.dv-stack'), empty: q('.dv-empty'), face: q('.dv-face'), count: q('.dv-heading-count'), heading: q('.dv-heading'),
     digits: q('.dv-time-digits'), period: q('.dv-time-period'), date: q('.dv-date'),
-    install: q('.dv-install'),
+    install: q('.dv-install'), player: q('.dv-player'), playerFrame: q('.dv-player-frame'), playerStart: q('.dv-player-start'),
     facemode: q('.dv-facemode'), bigface: q('.dv-bigface'), fmWho: q('.dv-facemode-who'), fmLine: q('.dv-facemode-line'), fmSub: q('.dv-facemode-sub'), fmAction: q('.dv-facemode-action'), fmHint: q('.dv-facemode-hint'),
     typebox: q('.dv-typebox'), typeInput: q('.dv-typebox-input'), typeToggle: q('.dv-type-toggle'),
     setup: q('.dv-setup'), setupText: q('.dv-setup-text'),
   };
   let firstRender = true;
-  let baseExpression = 'neutral';   // what the face does when nobody is talking
-  let override = null;              // assistant-driven expression, or null for auto
+  let override = null;              // assistant-driven expression, or null for auto (happy)
   let reactTimer = null;
   let installHandler = null;
   let highlightTimer = null;
-  const handlers = { talk: [], faceTap: [], submitText: [], enable: [], update: [], startAudio: [] };
+  const handlers = { talk: [], faceTap: [], submitText: [], enable: [], update: [], startAudio: [], complete: [] };
   let assistantState = 'idle';
   let hideTimer = null;
-  const emit = (event, ...args) => handlers[event].forEach((fn) => fn(...args));
+  const emit = (event, ...args) => handlers[event].map((fn) => fn(...args));
 
-  const applyExpression = () => { els.face.dataset.expression = override || baseExpression; };
+  const applyExpression = () => { els.face.dataset.expression = override || 'happy'; };
 
+  /** Something new arrived: a small "oh!" then back to the smile. */
   function react() {
     if (override) return;
-    els.face.dataset.expression = 'happy';
+    els.face.dataset.expression = 'surprised';
     clearTimeout(reactTimer);
     reactTimer = setTimeout(() => { reactTimer = null; applyExpression(); }, REACT_MS);
   }
 
+  function applyTheme(theme) {
+    const t = THEMES.includes(theme) ? theme : 'sky';
+    if (root.dataset.theme !== t) root.dataset.theme = t;
+    if (!preview && document.documentElement.dataset.theme !== t) {
+      document.documentElement.dataset.theme = t;
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(root).getPropertyValue('--theme-primary').trim() || '#25B4F5');
+    }
+  }
+
   function update(state) {
-    const visible = state.moduleOrder.filter((id) => state.modules[id]?.enabled);
+    applyTheme(state.device?.theme);
+    const now = Date.now();
+    const { entries, total } = stackEntries(state);
+    const shown = entries.slice(0, MAX_VISIBLE);
     let added = 0;
-    for (const el of liveChildren(els.stack)) if (!visible.includes(el.dataset.module)) leave(el);
-    const desired = visible.map((id) => {
-      let el = findChild(els.stack, 'module', id);
+    for (const el of liveChildren(els.stack)) if (!shown.some((e) => e.key === el.dataset.key)) leave(el);
+    const desired = shown.map((entry, i) => {
+      let el = findChild(els.stack, 'key', entry.key);
       if (el && el.classList.contains('is-leaving')) revive(el);
-      if (!el) { el = createModule(id); enter(el, added++); }
-      added += fillModule(el, id, state.modules[id]);
+      if (!el) {
+        el = createCard(entry);
+        if (entry.kind === 'item' && !preview) attachSwipe(el, () => Promise.all(emit('complete', entry.item.id)));
+        enter(el, added++);
+      }
+      el.style.setProperty('--i', i);
+      fillCard(el, entry, now);
       return el;
     });
     order(els.stack, desired);
-
-    const nothing = visible.length === 0;
+    setText(els.count, `(${total})`);
+    els.heading.classList.toggle('is-zero', total === 0);
+    const nothing = shown.length === 0;
     els.empty.hidden = !nothing;
-    baseExpression = nothing ? 'happy' : 'neutral';
+    els.stack.hidden = nothing;
     if (!firstRender && added > 0) react();
     else if (!reactTimer) applyExpression();
     firstRender = false;
+
+    // Deep Focus audio: the visible player takes the mascot's place while music plays
+    const focus = state.modules.focus;
+    const playing = Boolean(focus?.enabled && focus.musicPlaying && focus.currentTrackId);
+    els.player.hidden = !playing;
+    root.classList.toggle('is-playing', playing);
     emit('update', state);
   }
 
-  /** The visible YouTube player slot inside the Focus card (null when the card is not on screen). */
-  function focusMount() {
-    const module = findChild(els.stack, 'module', 'focus');
-    return module && !module.classList.contains('is-leaving') ? module.querySelector('.dv-player-frame') : null;
-  }
-  /** Autoplay was blocked: offer the one-tap start inside the Focus card. */
-  function setAudioBlocked(blocked) {
-    const btn = els.stack.querySelector('.dv-module[data-module="focus"] .dv-player-start');
-    if (btn) btn.hidden = !blocked;
-  }
+  /** The visible YouTube player slot (null while the player is not on screen). */
+  function focusMount() { return els.player.hidden ? null : els.playerFrame; }
+  /** Autoplay was blocked: offer the one-tap start under the player. */
+  function setAudioBlocked(blocked) { els.playerStart.hidden = !blocked; }
 
   function setClock(date) {
     let digits = '';
@@ -324,10 +405,8 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
     setText(els.date, new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(date));
   }
 
-  function setConnection(status, text) {
-    els.conn.dataset.status = status;
-    setText(els.connText, text);
-  }
+  /** Connection is infrastructure: no badge. The status lives on the root for debugging only. */
+  function setConnection(status) { root.dataset.conn = status; }
 
   function setInstall(visible, handler) {
     if (installHandler) els.install.removeEventListener('click', installHandler);
@@ -335,6 +414,8 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
     if (installHandler) els.install.addEventListener('click', installHandler);
     els.install.hidden = !visible;
   }
+
+  function setOrientation(portrait) { root.classList.toggle('is-portrait', Boolean(portrait)); }
 
   // ---------------------------------------------------------------- voice layer (state machine)
   const FACE_FOR = { listening: 'listening', processing: 'thinking', speaking: 'speaking', clarifying: 'puzzled', error: 'surprised' };
@@ -352,7 +433,7 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
       els.bigface.dataset.expression = FACE_FOR[state];
       setText(els.fmLine, text);
       els.fmLine.classList.toggle('is-empty', !text);
-      setText(els.fmSub, transcript ? '\u201c' + transcript + '\u201d' : '');
+      setText(els.fmSub, transcript ? '“' + transcript + '”' : '');
       els.fmAction.hidden = !action;
       setText(els.fmAction, action || '');
       setText(els.fmHint, HINT_FOR[state]);
@@ -360,7 +441,7 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
       requestAnimationFrame(() => els.facemode.classList.add('is-visible'));
     } else {
       els.facemode.classList.remove('is-visible');
-      hideTimer = setTimeout(() => { if (!FACE_STATES.includes(assistantState)) els.facemode.hidden = true; }, 420);
+      hideTimer = setTimeout(() => { if (!FACE_STATES.includes(assistantState)) els.facemode.hidden = true; }, 460);
       if (state === 'success') { setExpression('happy'); setTimeout(() => { if (assistantState === 'success' || assistantState === 'idle') setExpression('auto'); }, REACT_MS); }
     }
     root.classList.toggle('is-voice', forward);
@@ -375,11 +456,10 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
     clearTimeout(highlightTimer);
     root.querySelectorAll('.is-highlight').forEach((el) => el.classList.remove('is-highlight'));
     const targets = [
-      ...itemIds.map((id) => root.querySelector(`.dv-item[data-id="${CSS.escape(id)}"]`)),
-      ...modules.map((m) => root.querySelector(`.dv-module[data-module="${m}"] .dv-card`)),
+      ...itemIds.map((id) => root.querySelector(`.dv-card[data-id="${CSS.escape(id)}"]`)),
+      ...modules.map((m) => root.querySelector(`.dv-card[data-key="${m}"]`)),
     ].filter(Boolean);
     targets.forEach((el) => el.classList.add('is-highlight'));
-    targets[0]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     highlightTimer = setTimeout(() => targets.forEach((el) => el.classList.remove('is-highlight')), HIGHLIGHT_MS);
   }
 
@@ -414,9 +494,9 @@ export function createDeviceRenderer(root, { preview = false, debug = false } = 
     els.fmAction.addEventListener('click', () => emit('faceTap', assistantState, true));
     els.typeToggle.addEventListener('click', () => setTypeBox(els.typebox.hidden));
     els.typebox.addEventListener('submit', (e) => { e.preventDefault(); const text = els.typeInput.value.trim(); if (!text) return; els.typeInput.value = ''; emit('submitText', text); });
-    els.stack.addEventListener('click', (e) => { if (e.target.closest('.dv-player-start')) emit('startAudio'); });
+    els.playerStart.addEventListener('click', () => emit('startAudio'));
     els.typeInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') setTypeBox(false); });
   }
 
-  return { root, update, setClock, setConnection, setInstall, setAssistantState, setExpression, setHighlights, setTypeBox, setAssistantName, setSetup, focusMount, setAudioBlocked, on, get assistantState() { return assistantState; } };
+  return { root, update, setClock, setConnection, setInstall, setOrientation, setAssistantState, setExpression, setHighlights, setTypeBox, setAssistantName, setSetup, focusMount, setAudioBlocked, on, get assistantState() { return assistantState; } };
 }

@@ -25,7 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeState, DEFAULT_STATE } from './public/js/state.js';
-import { markReminderTriggered } from './public/js/actions.js';
+import { markReminderTriggered, completeItem } from './public/js/actions.js';
 import { handleCommand, ASSISTANT_NAME } from './lib/assistant.js';
 import { isConfigured, isMock, getModel, PROVIDER } from './lib/gemini.js';
 import * as realtime from './lib/realtime.js';
@@ -66,9 +66,25 @@ function persist(snapshot) {
   return writing;
 }
 
+/**
+ * The Control Centre posts the WHOLE state. If the device or Andrew completed an item in the
+ * meantime, a slightly stale post must not resurrect it or lose its Completed record: keep every
+ * completion the server knows about and drop any incoming list item that was already completed.
+ */
+function reconcileCompletions(incoming, current) {
+  const known = new Map((current.completed || []).map((c) => [c.id, c]));
+  const merged = [...(incoming.completed || [])];
+  for (const c of merged) known.delete(c.id);
+  merged.push(...known.values());
+  const done = new Set(merged.map((c) => c.id));
+  for (const mod of Object.values(incoming.modules)) if (Array.isArray(mod.items)) mod.items = mod.items.filter((it) => !done.has(it.id));
+  incoming.completed = merged;
+  return incoming;
+}
+
 /** The single write path: normalise, bump revision, stamp time, persist. */
 function applyState(input) {
-  const next = normalizeState(input);
+  const next = reconcileCompletions(normalizeState(input), state);
   next.revision = state.revision + 1;
   next.updatedAt = new Date().toISOString();
   state = next;
@@ -156,6 +172,18 @@ app.post('/api/realtime/tool', (req, res) => {
   }
 });
 
+// Mark an item done (device swipe or Control Centre): archived under state.completed, never lost.
+app.post('/api/items/complete', (req, res) => {
+  const itemId = typeof req.body?.itemId === 'string' ? req.body.itemId : '';
+  const method = typeof req.body?.method === 'string' ? req.body.method : 'control';
+  const working = structuredClone(state);
+  const r = completeItem(working, { itemId, method });
+  if (!r.ok) return noStore(res).status(404).json({ ok: false, error: 'not_found', message: r.message });
+  const saved = applyState(working);
+  console.log(`[Completed] ${method}: "${r.completed.title}" (${itemId})`);
+  noStore(res).json({ ok: true, completed: r.completed, state: saved });
+});
+
 // The device's reminder scheduler marks a spoken reminder as done the moment it fires (never twice).
 app.post('/api/reminders/triggered', (req, res) => {
   const itemId = typeof req.body?.itemId === 'string' ? req.body.itemId : '';
@@ -184,6 +212,7 @@ app.post('/api/assistant/command', async (req, res, next) => {
 const page = (file) => (req, res) => res.set('Cache-Control', 'no-cache').sendFile(path.join(PUBLIC_DIR, file));
 app.get('/', page('index.html'));
 app.get('/control', page('control.html'));
+app.get('/control/completed', page('completed.html'));
 app.get('/device', page('device.html'));
 
 app.use(express.static(PUBLIC_DIR, {

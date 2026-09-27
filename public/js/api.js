@@ -53,6 +53,8 @@ export const api = {
   realtimeToken: (payload) => request('/api/realtime/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), timeout: 20000 }),
   realtimeTool: (payload) => request('/api/realtime/tool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), timeout: 10000 }),
   realtimeInstructions: (payload) => request('/api/realtime/instructions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  /** Mark an item done (swipe on the device / Control Centre): archived under Completed. */
+  completeItem: (itemId, method) => request('/api/items/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemId, method }) }),
   /** A spoken reminder fired on the device: mark it so it never fires again. */
   reminderTriggered: (itemId) => request('/api/reminders/triggered', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemId }) }),
 };
