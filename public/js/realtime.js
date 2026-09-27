@@ -77,6 +77,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   let reminderSpeaking = false;
   let closing = false; // a goodbye is being said; when it ends, straight back to passive (no follow-up window)
   let pendingIntent = null; // 'focus_music_confirmation' while the device waits for yes/no to "Frequency music?"
+  let speakingQuestion = false; // the device itself asked something (speak('…?')): treat the reply as a question whatever the transcript says
   let lastState = null;
   let reportedPlaying = null; // last playback truth sent to the server
   const events = []; // debug ring buffer
@@ -272,7 +273,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     device.setHighlights({ itemIds: [item.id], modules: [] });
     armWatchdog(PROCESSING_WATCHDOG_MS);
     console.log('[Reminder] speaking via response.create:', item.title);
-    const sent = send({ type: 'response.create', response: { tool_choice: 'none', output_modalities: ['audio'], max_output_tokens: 120, instructions: `You are Andrew, the voice of the attn device. A reminder the user set earlier is due now. Say, warmly and in one short sentence, that it is time to: "${item.title}". For example: "Hey, it's time to ${item.title.toLowerCase()}." Nothing else.` } });
+    const sent = send({ type: 'response.create', response: { tool_choice: 'none', output_modalities: ['audio'], max_output_tokens: 400, instructions: `You are Andrew, the voice of the attn device. A reminder the user set earlier is due now. Say, warmly and in one short sentence, that it is time to: "${item.title}". For example: "Hey, it's time to ${item.title.toLowerCase()}." Nothing else.` } });
     if (!sent) { reminderSpeaking = false; setMode('passive', 'reminder not sent'); set('idle'); throw new Error('voice session not open'); }
   }
 
@@ -307,9 +308,10 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
   /** Andrew says exactly this, out of band (not added to the conversation), tools off. */
   function speak(text) {
     replyText = '';
+    speakingQuestion = /\?\s*$/.test(text);
     if (status !== 'speaking') set('processing', { transcript: userText });
     armWatchdog(PROCESSING_WATCHDOG_MS);
-    const sent = send({ type: 'response.create', response: { conversation: 'none', tool_choice: 'none', output_modalities: ['audio'], max_output_tokens: 60, instructions: `Say exactly this and nothing else: "${text}"` } });
+    const sent = send({ type: 'response.create', response: { conversation: 'none', tool_choice: 'none', output_modalities: ['audio'], max_output_tokens: 400, instructions: `Say exactly this and nothing else: "${text}"` } });
     if (!sent) { replyText = text; clearWatchdog(); afterResponse(); } // no session (debug): behave as if it was said
   }
   /** Keep the model's context truthful about what the device did on its own. */
@@ -341,12 +343,21 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     if (itemId) send({ type: 'conversation.item.delete', item_id: itemId }); // the device handled it; a note below keeps the context truthful
     try {
       switch (intent.type) {
-        case 'focus_start':
+        case 'focus_start': {
+          const f = lastState?.modules?.focus || {};
+          if (pendingIntent === 'focus_music_confirmation') { // the rest of the same request ("…block all notifications") — keep waiting for the answer
+            console.log('[Local] already asked about music — waiting for the answer');
+            set('clarifying', { text: 'Frequency music?' });
+            openActiveWindow(CLARIFY_WINDOW_MS, 'still waiting for the music answer');
+            return;
+          }
+          if (f.enabled && f.notificationsBlocked) { speak(f.currentTrackId ? 'Focus is on, music playing.' : 'Focus is on.'); break; }
           await localTool('set_focus', { enabled: true, label: 'Deep Focus', notificationsBlocked: true }, ['focus']);
           pendingIntent = 'focus_music_confirmation';
           note('Deep Focus is on; the card shows "Notifications blocked" (display only). The device asked "Frequency music?" itself and handles the yes/no. Do not ask again.');
           speak('Frequency music?');
           break;
+        }
         case 'focus_yes':
           pendingIntent = null;
           await localTool('start_focus_music', {}, ['focus']);
@@ -482,7 +493,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     replyText = '';
     set('processing', { transcript: '' });
     armWatchdog(PROCESSING_WATCHDOG_MS);
-    const sent = send({ type: 'response.create', response: { tool_choice: 'none', output_modalities: ['audio'], max_output_tokens: 40, instructions: 'The user is ending the conversation. Reply with one or two words only, such as "Anytime." or "You\'re welcome." or "Bye." Nothing else.' } });
+    const sent = send({ type: 'response.create', response: { tool_choice: 'none', output_modalities: ['audio'], max_output_tokens: 200, instructions: 'The user is ending the conversation. Reply with one or two words only, such as "Anytime." or "You\'re welcome." or "Bye." Nothing else.' } });
     if (!sent) { closing = false; setMode('passive', 'closed'); set('idle'); }
   }
 
@@ -611,7 +622,8 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     clearTimeout(idleTimer);
     if (reminderSpeaking) { reminderSpeaking = false; setMode('passive', 'reminder spoken'); toolChanged = false; pendingHighlights = { itemIds: [], modules: [] }; set('idle'); return; }
     if (closing) { closing = false; askedQuestion = false; toolChanged = false; pendingHighlights = { itemIds: [], modules: [] }; setMode('passive', 'closed'); set('idle'); return; }
-    askedQuestion = /\?\s*$/.test(replyText.trim());
+    askedQuestion = speakingQuestion || /\?\s*$/.test(replyText.trim());
+    speakingQuestion = false;
     if (askedQuestion) {
       // a question: stay forward with it on the face and wait for the answer
       pendingHighlights = { itemIds: [], modules: [] };
@@ -655,6 +667,7 @@ export function createRealtimeAssistant({ device, name = 'Andrew', debug = false
     reminderSpeaking = false;
     closing = false;
     pendingIntent = null;
+    speakingQuestion = false;
     setMode('passive', 'error');
     set('error', { text: message });
     idleTimer = setTimeout(() => { if (status === 'error') set('idle'); }, ERROR_LINGER_MS);
