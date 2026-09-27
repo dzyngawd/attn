@@ -74,7 +74,9 @@ export function setFocus(state, { enabled = true, title, subtitle } = {}) {
   focus.enabled = Boolean(enabled);
   if (typeof title === 'string' && title.trim()) focus.title = str(title, LIMITS.moduleTitle);
   if (typeof subtitle === 'string') focus.subtitle = str(subtitle, LIMITS.subtitle);
-  return { ok: true, message: enabled ? `Focus mode is on${focus.subtitle ? `: ${focus.subtitle}` : ''}.` : 'Focus mode is off.', module: 'focus' };
+  // attn cannot play audio: say so whenever the focus block is about music, even in the plain fallback wording
+  const audio = /music|audio|sound|playlist|song|frequenc|noise|beats/i.test(focus.subtitle);
+  return { ok: true, message: enabled ? `Focus mode is on${focus.subtitle ? `: ${focus.subtitle}` : ''}.${audio ? " I can't play audio yet." : ''}` : 'Focus mode is off.', module: 'focus' };
 }
 
 export function setNote(state, { text = '', append = false } = {}) {
